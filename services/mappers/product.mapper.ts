@@ -1,75 +1,146 @@
+import type {
+  MusicProduct,
+  Money,
+  ProductImage,
+  TaxonomyTerm,
+  Producer,
+  ProductType,
+} from "@/types/music-product";
+import type {
+  WooCommerceProductDto,
+  WooCommerceMediaItemDto,
+  WooCommerceProductTermDto,
+} from "@/types/dto/woocommerce-product.dto";
+
 // Product mapper
 //
 // Transforms a WooCommerceProductDto (types/dto/woocommerce-product.dto.ts)
-// into the canonical MusicProduct (types/music-product.ts). Full intended
-// pipeline:
+// into the canonical MusicProduct (types/music-product.ts). Pure — no
+// Apollo, no React, no I/O. Full pipeline and rationale for the DTO stage:
+// docs/api/product-query.md and docs/architecture.md.
 //
-//   WPGraphQL Response -> WooCommerce DTO -> Mapper -> MusicProduct -> Services -> React Components
-//
-// The DTO is a separate stage from MusicProduct on purpose. It's a type
-// that mirrors exactly what a given GraphQL query returns — WooCommerce's
-// field names, its Relay-style `{ nodes: [...] }` connection wrappers,
-// nullable fields exactly as the schema declares them, prices as the
-// formatted strings WPGraphQL sends. MusicProduct mirrors none of that; it's
-// shaped for what the UI needs. Collapsing the two into one step (parsing
-// a raw GraphQL response directly into MusicProduct inline) would mean:
-//
-//   - the mapper's input is only as typed as the raw query result, so a
-//     typo in a field path fails silently at runtime instead of at compile time
-//   - every WooCommerce quirk (nodes[] wrappers, string prices, nullable
-//     fields that are "never actually null in practice") has nowhere to be
-//     absorbed except the mapper body itself, mixed in with the real
-//     transformation logic
-//   - the mapper can't be unit tested with a plain fixture object typed
-//     against something real
-//
-// With a DTO, the mapper is a pure `(dto: WooCommerceProductDto) =>
-// MusicProduct` function: fully typed on both sides, testable with fixture
-// DTOs, and the one place allowed to know both shapes at once.
-//
-// The DTO itself (types/dto/woocommerce-product.dto.ts) was written from
-// live schema introspection against this project's actual WPGraphQL
-// endpoint, not guessed — see docs/decisions.md for the full investigation.
-// It currently covers `SimpleProduct` only; see the DTO file's header
-// comment for why.
-//
-// Implementation lands once the first product GraphQL query exists.
-// Planned mapping, field by field, using the verified DTO field paths:
-//
-//   MusicProduct field  <- WooCommerceProductDto source
-//   -----------------------------------------------------------------------
-//   id                  <- dto.id
-//   slug                <- dto.slug
-//   title               <- dto.name (WooCommerce's product title field is called `name`)
-//   description         <- dto.description
-//   productType         <- NOT YET AVAILABLE — no schema field maps to this today.
-//                           Recommended long-term source: a WooCommerce Global
-//                           Product Attribute (e.g. "Product Type"), not a
-//                           category, not WooCommerce's built-in ProductTypesEnum
-//                           (that's simple/variable/external/grouped — a
-//                           different concept). Full reasoning in docs/decisions.md.
-//   categories           <- dto.productCategories.nodes
-//   genres                <- still no dedicated taxonomy exists in the schema — see docs/product-model.md
-//   tags                  <- dto.productTags.nodes
-//   producer               <- still no schema field maps to this. Worth noting: a
-//                            `productBrands` taxonomy already exists in the schema
-//                            (currently empty of terms) and is a strong future
-//                            candidate — not wired up here, out of scope for this pass.
-//   artwork               <- dto.image (sourceUrl, altText, mediaDetails.width/height)
-//   gallery               <- dto.galleryImages.nodes
-//   bpm                   <- still no schema field maps to this — custom meta field, not yet registered
-//   musicalKey            <- still no schema field maps to this — custom meta field, not yet registered
-//   fileFormat            <- still no schema field maps to this. Worth noting:
-//                            SimpleProduct.downloads[].fileExt exists in the schema
-//                            (WooCommerce's native downloadable-files list) and could
-//                            source this without any custom field — not wired up here.
-//   duration               <- still no schema field maps to this — custom meta field, not yet registered
-//   previewUrl             <- still no schema field maps to this — custom meta field, not yet registered
-//   regularPrice          <- dto.regularPrice (string) parsed into { amount, currency }
-//   salePrice             <- dto.salePrice (string, nullable) parsed into { amount, currency } | null
-//   featured              <- dto.featured
-//   releaseDate           <- dto.date, unless the client wants a separate release date field
-//
-// export function mapWooCommerceProductToMusicProduct(dto: WooCommerceProductDto): MusicProduct {
-//   ...
-// }
+// Two fields have no WooCommerce source yet (`productType`, `producer`) —
+// see the constants below and docs/decisions.md for why. Everything else
+// maps from real, schema-verified fields.
+
+/**
+ * `productType` has no WooCommerce source today — no schema field maps to
+ * it (see docs/decisions.md, "Schema investigation" ADR). The recommended
+ * long-term source is a WooCommerce Global Product Attribute, not yet
+ * configured. Every mapped product gets this same value until that exists;
+ * this is a known placeholder, not a real classification.
+ */
+const UNRESOLVED_PRODUCT_TYPE: ProductType = "sample-pack";
+
+/**
+ * `producer` has no WooCommerce source today either. `productBrands` is a
+ * real, existing taxonomy that's the likely future source (see
+ * docs/decisions.md), but wiring it up is out of scope for this pass.
+ */
+const UNRESOLVED_PRODUCER: Producer = {
+  id: "",
+  name: "Unknown Producer",
+  slug: "",
+  avatarUrl: null,
+};
+
+/**
+ * No per-product or store-wide currency field exists anywhere in the
+ * schema (confirmed by searching every type during schema investigation —
+ * the only `currency` field in the entire schema is `Order.currency`).
+ * `wcSettings(group: "general")` could theoretically surface the store's
+ * currency setting, but that's a generic settings-API passthrough (opaque
+ * `id`/`label`/`options` fields, not a typed currency field) and would be a
+ * separate, store-wide fetch — not something this per-product mapper
+ * should own. Hardcoded until a real source is wired up.
+ */
+const FALLBACK_CURRENCY = "USD";
+
+export function mapWooCommerceProductToMusicProduct(
+  dto: WooCommerceProductDto,
+): MusicProduct {
+  return {
+    id: dto.id,
+    // WordPress practically always sets a slug for a published product;
+    // the DTO models it as nullable because the schema does, but falling
+    // back to the numeric ID keeps this field meaningfully non-empty
+    // rather than silently duplicating an empty string across products.
+    slug: dto.slug ?? String(dto.databaseId),
+    title: dto.name ?? "Untitled Product",
+    description: dto.description ?? "",
+
+    productType: UNRESOLVED_PRODUCT_TYPE,
+    categories: dto.productCategories.nodes.map(mapTerm),
+    genres: [],
+    tags: dto.productTags.nodes.map(mapTerm),
+
+    producer: UNRESOLVED_PRODUCER,
+
+    artwork: dto.image ? mapImage(dto.image) : null,
+    gallery: dto.galleryImages.nodes.map(mapImage),
+
+    bpm: null,
+    musicalKey: null,
+    fileFormat: [],
+    duration: null,
+    previewUrl: null,
+
+    // A real product should always have a regular price; falling back to
+    // zero (rather than throwing) keeps one incomplete product from
+    // breaking an entire product list.
+    regularPrice: dto.regularPrice
+      ? parseMoney(dto.regularPrice)
+      : { amount: 0, currency: FALLBACK_CURRENCY },
+    salePrice: dto.salePrice ? parseMoney(dto.salePrice) : null,
+
+    featured: dto.featured ?? false,
+    releaseDate: parseReleaseDate(dto.date),
+  };
+}
+
+function mapImage(image: WooCommerceMediaItemDto): ProductImage {
+  return {
+    url: image.sourceUrl ?? "",
+    alt: image.altText ?? "",
+    width: image.mediaDetails?.width ?? null,
+    height: image.mediaDetails?.height ?? null,
+  };
+}
+
+function mapTerm(term: WooCommerceProductTermDto): TaxonomyTerm {
+  return {
+    id: term.id,
+    name: term.name ?? "",
+    slug: term.slug ?? "",
+  };
+}
+
+/**
+ * WooCommerce/WPGraphQL price fields are documented as pre-formatted
+ * display strings (see docs/product-model.md), which may include a
+ * currency symbol or other formatting depending on store locale settings.
+ * Stripping everything but digits/decimal/minus is a defensive parse, not
+ * verified against real data — this store has no products yet to test
+ * against. Revisit once real priced products exist.
+ */
+function parseMoney(raw: string): Money {
+  const amount = Number(raw.replace(/[^0-9.-]/g, ""));
+  return {
+    amount: Number.isFinite(amount) ? amount : 0,
+    currency: FALLBACK_CURRENCY,
+  };
+}
+
+/**
+ * Normalizes to ISO 8601 defensively rather than passing `dto.date`
+ * through as-is — WPGraphQL's exact date format wasn't verified against
+ * real data (no products exist yet), and MusicProduct.releaseDate is
+ * documented as ISO 8601.
+ */
+function parseReleaseDate(raw: string | null): string | null {
+  if (!raw) {
+    return null;
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}

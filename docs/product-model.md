@@ -91,9 +91,9 @@ these are verified field paths, not assumptions:
 | `description` | `SimpleProduct.description` |
 | `categories` | `SimpleProduct.productCategories.nodes` (a real connection; hierarchical taxonomy, supports multiple per product) |
 | `tags` | `SimpleProduct.productTags.nodes` (flat taxonomy, no hierarchy) |
-| `artwork` | `SimpleProduct.image` (WooCommerce's direct product-image field — used over the generic `featuredImage` connection edge for simplicity) |
+| `artwork` | `SimpleProduct.image` (WooCommerce's direct product-image field — used over the generic `featuredImage` connection edge for simplicity). `null` when unset — see "Fields worth revisiting" |
 | `gallery` | `SimpleProduct.galleryImages.nodes` |
-| `regularPrice`, `salePrice` | `SimpleProduct.regularPrice` / `.salePrice` — string fields, only on the concrete product type, **not** on the shared `Product` interface |
+| `regularPrice`, `salePrice` | `SimpleProduct.regularPrice` / `.salePrice` — string fields, only on the concrete product type, **not** on the shared `Product` interface. Confirmed with a real test product to include a currency symbol (`"$29.99"`), not a bare decimal — the mapper strips it |
 | `featured` | `SimpleProduct.featured` |
 | `releaseDate` | `SimpleProduct.date` (post publish date), tentatively — see assumptions |
 
@@ -252,3 +252,15 @@ changed without the client's input.
 - **`musicalKey` and `fileFormat`** are intentionally loose (`string` /
   `string[]`) rather than closed unions. Worth tightening once there's a
   concrete reason to (filtering UI, search facets) — but not before.
+- **`artwork` is now `ProductImage | null`**, changed while wiring up the
+  real mapper (`services/mappers/product.mapper.ts`). Unlike the gaps
+  above, this wasn't a "not built yet" placeholder situation — a
+  WooCommerce product can permanently have no image set, which is a real
+  domain state, not a temporary one. See the ADR in
+  [decisions.md](decisions.md).
+- **`productType` and `producer` are populated with fixed placeholder
+  values today** (`"sample-pack"` and `{ name: "Unknown Producer", ... }`),
+  not real per-product data — every mapped product currently gets the
+  same values for both. This is intentional and documented loudly in
+  `product.mapper.ts` and [docs/api/product-query.md](api/product-query.md),
+  not a bug — there's still no WooCommerce source for either field.

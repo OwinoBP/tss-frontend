@@ -308,3 +308,58 @@ counterpart (`averageRating`, `reviewCount`, `totalSales`, `downloads`,
 [product-model.md](product-model.md) rather than added to the DTO
 speculatively — keeping the first DTO lean and fully justified by what the
 mapper actually needs to produce today.
+
+## First real product query: placeholders over widening the domain type
+
+Implementing the real mapper (`services/mappers/product.mapper.ts`) forced
+a decision the investigation pass could only flag, not resolve:
+`productType` and `producer` are required `MusicProduct` fields with no
+WooCommerce source at all yet. Two options existed — widen both to
+nullable (matching the pattern used for `artwork`, below), or map every
+product to a fixed, obviously-fake placeholder value. Placeholders were
+chosen, deliberately not the nullable pattern, because the two situations
+are different: a product having no image is a normal, permanent state for
+real catalog data, whereas "no productType" or "no producer" would never
+be true for a real, complete product on this marketplace — it's a
+temporary gap in what the backend exposes today, not a fact about the
+business domain. Widening the type to make room for that gap would
+misrepresent a backend limitation as a domain characteristic, and every
+future consumer of `MusicProduct` would have to handle `productType: null`
+forever, even after a Global Product Attribute makes it always available.
+`UNRESOLVED_PRODUCT_TYPE`/`UNRESOLVED_PRODUCER` in `product.mapper.ts` are
+that decision made explicit and centralized to one place to update later.
+
+**`artwork` did get widened** (`ProductImage` → `ProductImage | null`) for
+the opposite reason: a product permanently having no photo is a real,
+ordinary state, not a gap waiting to be filled by backend work. Same
+category of problem — a required field the mapper couldn't always
+populate — opposite fix, because the underlying reality is different. See
+[product-model.md](product-model.md) for where this is flagged for anyone
+reading the model.
+
+**Verification used a real product, not just the empty-catalog case.**
+The store has no real products yet, so a temporary one was created via
+`wp wc product create` (name, price, sale price, a category, a tag, a
+featured image), fetched through `/dev/products`, confirmed to render
+correctly, then deleted along with the category/tag terms it required —
+the store was left exactly as found. This is what surfaced two facts that
+were previously assumptions: `regularPrice`/`salePrice` come back as
+formatted strings *with a currency symbol* (`"$29.99"`, not `"29.99"`),
+confirming the mapper's defensive stripping is necessary rather than
+paranoid; and no field in the entire schema exposes store currency
+(confirmed by searching every type's fields, not just the fields on
+`Product`) — the only `currency` field anywhere is `Order.currency`. The
+mapper hardcodes `"USD"` until a real source exists; see
+[docs/api/product-query.md](api/product-query.md) for the full list of
+fields retrieved and why.
+
+**Filtering non-`SimpleProduct` nodes happens in `product.service.ts`, not
+the mapper.** `products.nodes` is typed `[Product!]!` — the shared
+interface — so a node that's actually a `VariableProduct` (or any other
+concrete type) would come back missing nearly every field this query
+selects, since the `... on SimpleProduct` inline fragment contributes
+nothing to it. The mapper stays a pure, single-item `WooCommerceProductDto
+-> MusicProduct` transform per this task's requirement; deciding which raw
+nodes are even safe to treat as a `WooCommerceProductDto` is a
+collection-level concern, so it belongs in the service function that
+already owns the array.

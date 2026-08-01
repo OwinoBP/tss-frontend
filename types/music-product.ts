@@ -31,7 +31,14 @@ export interface MusicProduct {
 
   producer: Producer;
 
-  artwork: ProductImage;
+  /**
+   * `null` when the product has no image set. Discovered wiring up the
+   * real WooCommerce data: unlike most other required fields, "no product
+   * photo" is a normal, permanent state for a real product — not a
+   * temporary backend gap — so this is nullable rather than defaulting to
+   * a placeholder image. See docs/api/product-query.md.
+   */
+  artwork: ProductImage | null;
   /** Additional preview images (waveform screenshots, plugin UI, packaging, etc.). */
   gallery: ProductImage[];
 
