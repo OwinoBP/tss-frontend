@@ -17,15 +17,15 @@ export default async function GraphQLDevPage() {
 
   if (!siteInfo) {
     return (
-      <main style={{ padding: 24, fontFamily: "monospace" }}>
+      <div style={{ padding: 24, fontFamily: "monospace" }}>
         <h1>GraphQL Not Connected</h1>
         <p>{errorMessage}</p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: "monospace" }}>
+    <div style={{ padding: 24, fontFamily: "monospace" }}>
       <h1>GraphQL Connected</h1>
       <p>
         <strong>Title:</strong> {siteInfo.title}
@@ -36,6 +36,6 @@ export default async function GraphQLDevPage() {
       <p>
         <strong>URL:</strong> {siteInfo.url}
       </p>
-    </main>
+    </div>
   );
 }

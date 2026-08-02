@@ -18,24 +18,24 @@ export default async function ProductsDevPage() {
 
   if (!products) {
     return (
-      <main style={{ padding: 24, fontFamily: "monospace" }}>
+      <div style={{ padding: 24, fontFamily: "monospace" }}>
         <h1>Failed to load products</h1>
         <p>{errorMessage}</p>
-      </main>
+      </div>
     );
   }
 
   if (products.length === 0) {
     return (
-      <main style={{ padding: 24, fontFamily: "monospace" }}>
+      <div style={{ padding: 24, fontFamily: "monospace" }}>
         <h1>Products</h1>
         <p>No products found.</p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: "monospace" }}>
+    <div style={{ padding: 24, fontFamily: "monospace" }}>
       <h1>Products ({products.length})</h1>
       <ul>
         {products.map((product) => (
@@ -56,6 +56,6 @@ export default async function ProductsDevPage() {
           </li>
         ))}
       </ul>
-    </main>
+    </div>
   );
 }

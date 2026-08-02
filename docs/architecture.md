@@ -126,11 +126,11 @@ UI code (only the mapper that translates it).
 app/            routing only — pages, layouts, route handlers
 components/
   ui/           shadcn primitives (unstyled building blocks)
-  layout/       header, footer, nav — created when the first one is built
+  layout/       Container, Section, Header, Navigation, Footer, SkipToContent, Shell
   commerce/     cart, checkout, pricing UI — created on first use
   music/        player, track list, waveform UI — created on first use
   marketing/    landing/promo sections — created on first use
-  common/       shared, feature-agnostic UI — created on first use
+  common/       shared, feature-agnostic UI (e.g. Logo)
 lib/
   apollo/       Apollo Client setup — client + provider (browser), rsc-client (server), links
   env.ts        typed environment access
@@ -183,3 +183,23 @@ Three files, each with one responsibility:
 values that come from `process.env` (environment-dependent); `lib/config`
 is for non-secret constants that don't vary by environment. See
 [component-principles.md](component-principles.md#configuration-comes-from-libconfig).
+
+## Layout foundation
+
+`components/layout/Shell` is the application shell every page renders
+inside — wired into `app/layout.tsx`, not something individual pages
+opt into. It composes `SkipToContent`, `Header` (which composes `Logo`
+from `components/common/` and `Navigation`), the page's own content
+inside one `<main id="main-content">` landmark, and `Footer`.
+
+`Container` and `Section` are the layout primitives everything else is
+built from — consistent max-width/padding and consistent vertical rhythm,
+both sourced from `lib/config/theme.ts` rather than hardcoded. Getting a
+responsive theme.ts value into real, working CSS needs one specific
+technique (`toResponsiveVars`, `lib/utils.ts`) — see
+[decisions.md](decisions.md) for why a plain Tailwind arbitrary-value
+class doesn't work for this and what does instead.
+
+No commerce, cart, search, or account UI exists in `Navigation` yet — see
+[decisions.md](decisions.md) for why that's a scope decision, not an
+oversight.

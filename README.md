@@ -95,6 +95,7 @@ empty in advance. Details: [docs/architecture.md](docs/architecture.md#folder-ph
 - [x] First GraphQL query (`graphql/queries/products.query.ts`) and `product.service.ts` implementation
 - [x] Design system and component principles documentation
 - [x] Centralized configuration layer (`lib/config`)
+- [x] Layout foundation and application shell (`components/layout`)
 - [ ] Product listing and detail pages
 - [ ] Cart and checkout flow
 - [ ] Audio player / music browsing UI

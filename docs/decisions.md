@@ -424,3 +424,63 @@ other than the untouched create-next-app homepage and the `/dev/*`
 diagnostic routes exists yet, so `routes.ts` currently has no call sites.
 That's expected for infrastructure landing ahead of the UI that will
 consume it, not a sign it was unnecessary.
+
+## Layout foundation: consuming theme.ts values as real responsive CSS
+
+Building `Container` and `Section` (`components/layout/`) surfaced a
+Tailwind v4 constraint the config-layer branch hadn't hit yet:
+`containerPadding`/`sectionSpacing` in `lib/config/theme.ts` are
+responsive (a different number per breakpoint), and Tailwind's compiler
+statically scans source files for class name *text* — it can't see the
+result of `` `px-[${containerPadding.desktop}px]` ``, so a dynamically
+interpolated arbitrary-value class silently generates no CSS at all.
+
+**Resolved with Tailwind v4's custom-property shorthand
+(`px-(--container-padding-desktop)`), not by hardcoding the numbers as
+plain Tailwind classes.** The className strings are static (Tailwind can
+see `--container-padding-desktop` as literal text), while the *value* of
+that CSS variable is set via inline `style`, computed from theme.ts at
+render time — so theme.ts stays the single source of truth, verified by
+inspecting the actual compiled CSS output (`.px-\(--container-padding-mobile\){padding-inline:var(--container-padding-mobile)}`
+inside the correct `@media` blocks), not assumed to work. `card.tsx`
+already uses this exact pattern (`py-(--card-spacing)`) — this wasn't a
+new technique introduced for this branch, just the first time it was
+needed for a value that comes from `lib/config` rather than a
+component's own local state.
+
+The shared logic (building the four-breakpoint CSS-variable object) was
+extracted to `toResponsiveVars` in `lib/utils.ts` rather than duplicated
+between `Container`, `Section`, and `Footer` — three consumers crossed the
+threshold docs/component-principles.md sets for "shared, not colocated."
+
+**Non-responsive theme.ts values (`Header`'s height, `SkipToContent`'s
+z-index) use a plain inline `style` instead** — no custom-property
+indirection needed, since there's no per-breakpoint variation to express
+and no Tailwind involvement at all for those two properties.
+
+## Navigation scope: primary catalog links only
+
+`Navigation` renders only the primary (catalog) links —
+Products/Categories/Product Types/Producers/About/Contact — not the
+utility-nav items (search, cart, account) docs/design-system.md's
+Navigation Principles describes as a second tier. `routes.ts` defines
+paths for all of them, but search, cart, checkout, and account are
+explicitly out of this branch's scope; a nav item linking to `/cart` would
+mean shipping a stub link to a feature that doesn't exist, which reads as
+commerce UI, not "establishing the navigation API." Utility nav items can
+be added to `Navigation` (or a sibling component) once those features
+actually exist.
+
+## Fixing three pre-existing double-`<main>` landmarks
+
+Wiring `Shell` into `app/layout.tsx` gives every page one `<main
+id="main-content">` landmark, matching `SkipToContent`'s target. Three
+existing pages already rendered their own `<main>` internally — the
+untouched create-next-app homepage (`app/page.tsx`) and both `/dev/*`
+diagnostic pages — which would have nested a second `<main>` inside the
+Shell's, an invalid, `axe`-flagged landmark structure. Each was changed
+from `<main>` to `<div>` with no other change — a direct, mechanical
+consequence of introducing the Shell, not a redesign of any of those
+pages' content, and within scope even for the untouched homepage (`app/page.tsx`
+still displays the identical create-next-app boilerplate content — only
+its outermost tag changed).
