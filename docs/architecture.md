@@ -85,9 +85,9 @@ query or schema at compile time; skipping it means the mapper's input is
 only as reliable as an untyped or loosely-typed raw response.
 
 GraphQL documents live under `graphql/queries/`, `graphql/mutations/`,
-`graphql/fragments/` — created as each is actually needed (`queries/` now
-exists; the others will follow the first mutation/fragment). Nothing
-outside `graphql/` writes GraphQL syntax.
+`graphql/fragments/` — created as each is actually needed (`queries/` and
+`fragments/` now exist; `mutations/` will follow the first mutation).
+Nothing outside `graphql/` writes GraphQL syntax.
 
 `lib/apollo/` has two client entry points, not one, because Server
 Components and Client Components need different lifetimes:
@@ -134,19 +134,25 @@ components/
 lib/
   apollo/       Apollo Client setup — client + provider (browser), rsc-client (server), links
   env.ts        typed environment access
+  config/       non-secret app constants (default page size, feature flags) — created on first use, see component-principles.md
 graphql/
-  queries/      GraphQL queries (e.g. site-info.ts)
+  queries/      GraphQL queries (e.g. site-info.ts, products.query.ts)
   mutations/    created on first mutation
-  fragments/    created on first shared fragment
+  fragments/    GraphQL fragments (e.g. product-card.fragment.ts)
 services/       the only callers of Apollo Client; UI's data contract
   mappers/      WooCommerce DTO -> domain type transformations
 hooks/          shared React hooks — created on first use
 types/          shared TypeScript types (e.g. MusicProduct)
   dto/          types mirroring WPGraphQL responses (e.g. WooCommerceProductDto)
-data/           static/config data (e.g. nav structure) — created on first use
+data/           static content (e.g. nav structure) — created on first use, distinct from lib/config — see component-principles.md
 ```
 
 The rule throughout: a folder is created when the first file that belongs
 in it is written, not in advance. Empty folders don't survive in git and
 add nothing but noise — the target shape above is the plan, not something
 to scaffold speculatively.
+
+For how components built inside `components/` should be structured, and
+the visual language they should follow, see
+[component-principles.md](component-principles.md) and
+[design-system.md](design-system.md).

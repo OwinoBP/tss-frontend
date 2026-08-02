@@ -264,3 +264,10 @@ changed without the client's input.
   same values for both. This is intentional and documented loudly in
   `product.mapper.ts` and [docs/api/product-query.md](api/product-query.md),
   not a bug — there's still no WooCommerce source for either field.
+
+## See also
+
+- [design-system.md](design-system.md#product-card-anatomy) — how these
+  fields are intended to be displayed once product UI is built
+- [component-principles.md](component-principles.md) — the rule that
+  components consume this model directly, never the DTO it's mapped from

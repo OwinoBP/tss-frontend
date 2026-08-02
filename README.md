@@ -82,12 +82,18 @@ empty in advance. Details: [docs/architecture.md](docs/architecture.md#folder-ph
 - [docs/architecture.md](docs/architecture.md) — system architecture, GraphQL flow, service layer
 - [docs/setup.md](docs/setup.md) — local dev setup, env vars, commands
 - [docs/decisions.md](docs/decisions.md) — why each major technology and pattern was chosen
+- [docs/product-model.md](docs/product-model.md) — the canonical `MusicProduct` domain model
+- [docs/api/product-query.md](docs/api/product-query.md) — the first real product query, field by field
+- [docs/design-system.md](docs/design-system.md) — the visual language: typography, color, spacing, layout, and more
+- [docs/component-principles.md](docs/component-principles.md) — architectural rules for UI components
 
 ## Roadmap
 
 - [x] Project architecture review
 - [x] Apollo Client + GraphQL infrastructure
-- [ ] First GraphQL queries (`graphql/queries/`) and `product.service.ts` implementation
+- [x] Canonical `MusicProduct` domain model
+- [x] First GraphQL query (`graphql/queries/products.query.ts`) and `product.service.ts` implementation
+- [x] Design system and component principles documentation
 - [ ] Product listing and detail pages
 - [ ] Cart and checkout flow
 - [ ] Audio player / music browsing UI
