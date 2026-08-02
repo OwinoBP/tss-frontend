@@ -363,3 +363,64 @@ nothing to it. The mapper stays a pure, single-item `WooCommerceProductDto
 nodes are even safe to treat as a `WooCommerceProductDto` is a
 collection-level concern, so it belongs in the service function that
 already owns the array.
+
+## Centralized configuration: `lib/config`
+
+`lib/config/` (`store.ts`, `routes.ts`, `theme.ts`) implements a folder
+that had been documented as planned since the architecture review but had
+no content until this pass. A few decisions worth recording.
+
+**`StoreConfig` is an exported interface, `storeConfig` a separate
+exported instance of it.** The stated goal was supporting future Maabara
+storefronts beyond TSS, not just TSS itself. Exporting the shape
+separately from the data means a second storefront can define its own
+object typed against `StoreConfig` rather than this file accumulating
+`if (store === "tss")` branches — the extensibility is in the type being
+reusable, not in any multi-tenancy logic actually being built yet (none
+was — that would be speculative for a branch with exactly one storefront
+to configure).
+
+**`theme.ts` deliberately excludes color, radius, shadow, and icon
+tokens**, despite `docs/design-system.md` documenting all of them. Those
+are already implemented as CSS custom properties in `app/globals.css` and
+consumed through Tailwind utility classes (`bg-background`, `rounded-xl`)
+— exposing them again as TypeScript constants would be the exact
+duplication the task asked to avoid. What's in `theme.ts` is either
+consumed outside Tailwind's class-based styling (aspect ratios used in
+layout math, animation durations passed to a motion library) or doesn't
+have a Tailwind utility of its own (grid column defaults, header height).
+
+**Every numeric value in `theme.ts` cites the design-system.md section it
+came from — none were invented independently.** Two gaps surfaced in the
+process: `docs/design-system.md` didn't yet define header height, footer
+spacing, or a z-index scale, despite the task asking `theme.ts` to expose
+them. Per that document's own stated rule ("if this document doesn't have
+the token a component needs, that's a gap in this document to fix, not a
+license to improvise"), those three were added to design-system.md first,
+then encoded in `theme.ts` — not invented directly in code with no
+documented source. Where design-system.md gives a *range* rather than a
+single value (e.g. container padding "48–64px" on desktop), the lower
+bound was used consistently as the canonical value, rather than picking
+different rounding rules per token.
+
+**`UNRESOLVED_PRODUCT_TYPE` and `UNRESOLVED_PRODUCER`
+(`services/mappers/product.mapper.ts`) were deliberately left out of
+`lib/config`.** They look like configuration (constants set once, read
+elsewhere) but aren't: per the ADR above ("First real product query:
+placeholders over widening the domain type"), they represent a temporary
+absence of real WooCommerce data, not a business setting anyone would
+configure. Moving them to `lib/config` would relabel a data gap as a
+configuration choice. `FALLBACK_CURRENCY` in the same file, by contrast,
+*was* moved (it now reads `storeConfig.currency.code`) — a store's
+currency genuinely is configuration, even though today it's a fallback
+for the same underlying reason (no schema field exposes it yet).
+
+**Only two hardcoded values existed to migrate**, found by searching the
+codebase rather than assumed: `DEFAULT_PAGE_SIZE` in
+`services/product.service.ts` (now `storeConfig.catalog.productsPerPage`)
+and `FALLBACK_CURRENCY` in the mapper (now `storeConfig.currency.code`).
+No hardcoded route strings existed to migrate `routes.ts` into — no page
+other than the untouched create-next-app homepage and the `/dev/*`
+diagnostic routes exists yet, so `routes.ts` currently has no call sites.
+That's expected for infrastructure landing ahead of the UI that will
+consume it, not a sign it was unnecessary.

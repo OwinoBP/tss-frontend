@@ -1,6 +1,7 @@
 import { query } from "@/lib/apollo/rsc-client";
 import { PRODUCTS_QUERY } from "@/graphql/queries/products.query";
 import { mapWooCommerceProductToMusicProduct } from "@/services/mappers/product.mapper";
+import { storeConfig } from "@/lib/config";
 import type { MusicProduct } from "@/types/music-product";
 
 // Product service
@@ -15,8 +16,6 @@ import type { MusicProduct } from "@/types/music-product";
 // getProducts is implemented below. The rest wait on queries this pass
 // doesn't build (a single-product query, a search query) — see
 // docs/api/product-query.md.
-
-const DEFAULT_PAGE_SIZE = 20;
 
 export interface GetProductsParams {
   first?: number;
@@ -40,7 +39,7 @@ export async function getProducts(
   const { data } = await query({
     query: PRODUCTS_QUERY,
     variables: {
-      first: params.first ?? DEFAULT_PAGE_SIZE,
+      first: params.first ?? storeConfig.catalog.productsPerPage,
       after: params.after ?? null,
     },
     errorPolicy: "none",

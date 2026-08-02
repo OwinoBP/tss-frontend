@@ -134,7 +134,7 @@ components/
 lib/
   apollo/       Apollo Client setup — client + provider (browser), rsc-client (server), links
   env.ts        typed environment access
-  config/       non-secret app constants (default page size, feature flags) — created on first use, see component-principles.md
+  config/       centralized app configuration — store.ts, routes.ts, theme.ts
 graphql/
   queries/      GraphQL queries (e.g. site-info.ts, products.query.ts)
   mutations/    created on first mutation
@@ -156,3 +156,30 @@ For how components built inside `components/` should be structured, and
 the visual language they should follow, see
 [component-principles.md](component-principles.md) and
 [design-system.md](design-system.md).
+
+## Configuration layer
+
+`lib/config/` is the single source of truth for application constants —
+part of the architectural contract now, not just a documented convention.
+Three files, each with one responsibility:
+
+- **`store.ts`** — store identity, currency, locale, contact info, social
+  links, catalog defaults, SEO defaults, and feature flags, all typed
+  through an exported `StoreConfig` interface. The interface is exported
+  separately from `storeConfig` (the TSS instance of it) so a future
+  Maabara storefront can define its own config of the same shape.
+- **`routes.ts`** — every internal path the app links to, as named
+  constants and slug-based path builders. No component should write a
+  route as a string literal.
+- **`theme.ts`** — numeric design constants from
+  [design-system.md](design-system.md) that code needs as values (layout
+  math, animation durations), not Tailwind classes. Deliberately excludes
+  color/radius/shadow/icon tokens — those already exist as CSS custom
+  properties in `app/globals.css` and are consumed via Tailwind utility
+  classes; re-declaring them here would duplicate that configuration
+  rather than centralize it.
+
+`lib/env.ts` and `lib/config/` stay separate on purpose: `env.ts` is for
+values that come from `process.env` (environment-dependent); `lib/config`
+is for non-secret constants that don't vary by environment. See
+[component-principles.md](component-principles.md#configuration-comes-from-libconfig).

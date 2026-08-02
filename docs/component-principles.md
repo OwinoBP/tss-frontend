@@ -104,31 +104,27 @@ Apollo directly from the client bundle.)
 
 ## Configuration comes from `lib/config`
 
-`lib/config` doesn't exist yet — this section establishes the rule for
-when it does, following this project's existing convention of creating a
-folder only once something real belongs in it (see architecture.md,
-"Folder philosophy").
+`lib/config/` exists (`store.ts`, `routes.ts`, `theme.ts`, `index.ts` —
+see [architecture.md](architecture.md#configuration-layer) for what each
+file owns). No component should hardcode a value that's really
+configuration — a page size, a route path, a currency fallback, a feature
+toggle, a layout constant — it belongs in `lib/config`, imported, not
+inlined.
 
-Distinguish it from `lib/env.ts` (already exists): `env.ts` is for values
-that come from `process.env` — things that differ per environment.
-`lib/config` is for non-secret, non-environment-specific application
-constants — default page sizes, fallback values, feature flags, business
-rules that happen to be hardcoded today. A concrete example already in
-the codebase: `FALLBACK_CURRENCY` in `services/mappers/product.mapper.ts`
-is exactly the kind of value that belongs in `lib/config` once that folder
-exists — it's not a secret, it's not environment-dependent, it's a
-constant the mapper currently owns only because there's nowhere better for
-it yet.
+Distinguish it from `lib/env.ts`: `env.ts` is for values that come from
+`process.env` — things that differ per environment. `lib/config` is for
+non-secret, non-environment-specific application constants. Concrete
+examples already wired up: `services/product.service.ts` reads its
+default page size from `storeConfig.catalog.productsPerPage`, and
+`services/mappers/product.mapper.ts` reads its currency fallback from
+`storeConfig.currency.code` — neither hardcodes the value directly
+anymore.
 
-Components should never hardcode a value that's really configuration
-(a page size, a currency fallback, a feature toggle) — it belongs in
-`lib/config`, imported, not inlined.
-
-Also distinguish it from `data/` (already documented in architecture.md's
-"Folder philosophy," not yet created either): `data/` is for static
-*content* — things an editor might reasonably change, like nav structure
-or marketing copy. `lib/config` is for *engineering* constants a developer
-sets, not content. Not redundant — different kinds of "static values."
+Also distinguish it from `data/` (documented in architecture.md's "Folder
+philosophy," not yet created): `data/` is for static *content* — things an
+editor might reasonably change, like nav structure or marketing copy.
+`lib/config` is for *engineering* constants a developer sets, not content.
+Not redundant — different kinds of "static values."
 
 ## Avoid duplicated styling decisions
 

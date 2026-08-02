@@ -305,6 +305,24 @@ reuse the light-mode values.
 
 ---
 
+## Z-index scale
+
+**(Proposed — no z-index tokens exist in `app/globals.css` yet.)** A fixed,
+sparse scale — gaps are left between each step deliberately, so a future
+layer can be inserted without renumbering everything else.
+
+| Token | Value | Usage |
+|---|---|---|
+| `base` | 0 | Default stacking — ordinary page content |
+| `sticky` | 10 | Sticky header/nav |
+| `dropdown` | 20 | Dropdowns, popovers, select menus |
+| `drawer` | 30 | Mobile navigation drawer, filter drawer |
+| `overlay` | 40 | Modal/dialog backdrop |
+| `modal` | 50 | Modal/dialog content |
+| `toast` | 60 | Notifications/toasts — must stay above everything, including an open modal |
+
+---
+
 ## Icon sizing
 
 Icon library: **lucide-react** (already configured — see `components.json`).
@@ -358,6 +376,14 @@ what makes "section" legible as a concept at all.
 Product grid gutters: `lg` (24px) on desktop, `md`–`sm` (12–16px) on
 mobile — grids get tighter on small screens where every pixel of width
 matters more than breathing room.
+
+### Header & footer
+
+| Element | Value | Usage |
+|---|---|---|
+| Header height (default) | 72px | Resting state — comfortable room for logo + primary nav |
+| Header height (compact) | 56px | Scrolled state — the "compress rather than disappear" behaviour already described in Navigation Principles |
+| Footer spacing | Section Spacing tokens (`2xl`–`4xl`, 48–96px) | The footer is treated as just another major page section, not a special case — its top/bottom padding uses the same tier as any other section boundary |
 
 ### Alignment rules
 

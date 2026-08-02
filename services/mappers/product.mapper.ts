@@ -11,6 +11,7 @@ import type {
   WooCommerceMediaItemDto,
   WooCommerceProductTermDto,
 } from "@/types/dto/woocommerce-product.dto";
+import { storeConfig } from "@/lib/config";
 
 // Product mapper
 //
@@ -52,9 +53,10 @@ const UNRESOLVED_PRODUCER: Producer = {
  * currency setting, but that's a generic settings-API passthrough (opaque
  * `id`/`label`/`options` fields, not a typed currency field) and would be a
  * separate, store-wide fetch — not something this per-product mapper
- * should own. Hardcoded until a real source is wired up.
+ * should own. Falls back to `storeConfig.currency.code`
+ * (`lib/config/store.ts`) until a real per-product/store source exists.
  */
-const FALLBACK_CURRENCY = "USD";
+const FALLBACK_CURRENCY = storeConfig.currency.code;
 
 export function mapWooCommerceProductToMusicProduct(
   dto: WooCommerceProductDto,

@@ -94,6 +94,7 @@ empty in advance. Details: [docs/architecture.md](docs/architecture.md#folder-ph
 - [x] Canonical `MusicProduct` domain model
 - [x] First GraphQL query (`graphql/queries/products.query.ts`) and `product.service.ts` implementation
 - [x] Design system and component principles documentation
+- [x] Centralized configuration layer (`lib/config`)
 - [ ] Product listing and detail pages
 - [ ] Cart and checkout flow
 - [ ] Audio player / music browsing UI
