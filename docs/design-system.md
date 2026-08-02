@@ -425,10 +425,16 @@ smaller version of the same layout.
 
 ## Product card anatomy
 
-A specification, not an implementation — no component exists yet. Every
-element below maps to a real `MusicProduct` field
-(`types/music-product.ts`), so implementation should need no data
-decisions, only visual ones.
+Implemented in `components/commerce/ProductCard` (`feature/product-card`).
+Every element below maps to a real `MusicProduct` field
+(`types/music-product.ts`), reshaped by `product-card.mapper.ts` into the
+`ProductCardProps` the component actually renders — see
+[architecture.md](architecture.md) and [decisions.md](decisions.md) for
+that mapping layer and the handful of judgment calls made while
+implementing this spec (Product type as Caption-style text rather than a
+`Badge`, since only `Badges` below is documented as pill-shaped; the
+Badges row itself unused for now since nothing in this pass needed
+`featured`/sale flags).
 
 | Element | Source field | Notes |
 |---|---|---|

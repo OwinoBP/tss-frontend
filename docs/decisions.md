@@ -553,3 +553,125 @@ own children in, now relying on `Section`'s. Same reasoning as the
 shared layout infrastructure at first real use rather than let every
 future `Section` consumer either duplicate the heading's container or
 rediscover the same misalignment.
+
+## ProductCard: a presentation model between MusicProduct and the component
+
+`feature/product-card` is the first `components/commerce/` component and
+the first component built specifically for reuse across many future pages
+(grids, carousels, related-product rails) rather than for one page. That
+reuse requirement is what drove the main structural decision: `ProductCard`
+never receives a `MusicProduct` — it receives `ProductCardProps`, produced
+by a new pure mapper:
+
+```
+MusicProduct -> toProductCard() -> ProductCardProps -> ProductCard
+```
+
+This mirrors the DTO -> domain mapper shape already established for the
+data layer (`services/mappers/product.mapper.ts`), one stage further down
+the pipeline described in docs/architecture.md and
+docs/component-principles.md ("Components consume canonical domain models
+only"). Concretely, this is what a `MusicProduct -> ProductCardProps`
+step buys over passing `MusicProduct` straight into the component:
+
+- **`ProductCard` only imports what it renders.** `MusicProduct` carries
+  `bpm`, `musicalKey`, `fileFormat`, `duration`, `previewUrl`,
+  `categories`, `genres`, `tags`, `releaseDate` — none of which this card
+  displays. A component typed against the full domain model can reach for
+  any of those later without a compiler error, which is exactly the kind
+  of silent scope creep a narrower prop type prevents.
+- **Formatting happens once, in a pure function.** `price.regular` /
+  `price.sale` are already `Intl.NumberFormat`-rendered strings
+  (`"$29.99"`) by the time `ProductCard` sees them — the component does no
+  currency math, and `toProductCard` is trivially unit-testable with a
+  plain `MusicProduct` fixture, no rendering involved.
+- **The component stays genuinely reusable.** Anything that can produce a
+  `ProductCardProps` can render a `ProductCard` — a future wishlist page,
+  a "related products" rail sourced differently than the main catalog
+  query, or a Storybook fixture — without any of them needing to know
+  `MusicProduct`'s full shape or `toProductCard`'s existence at all.
+
+**`product-card.mapper.ts` is colocated inside
+`components/commerce/ProductCard/`, not under `services/mappers/`.** The
+existing `services/mappers/` holds WooCommerce-DTO -> domain mappers —
+mappers with GraphQL/WooCommerce knowledge, owned by the service layer.
+`toProductCard` has none of that; it's domain model -> presentation model,
+a concern that belongs to the component that consumes its output, not to
+the data-fetching layer. Keeping it in the component's own folder also
+means the component and the shape it depends on can't drift apart
+silently in two different parts of the tree.
+
+**Two label maps for `ProductType`, not one shared and pluralized.**
+`components/marketing/ShopByType` already has its own plural labels
+("Sample Packs", for a category-browsing tile). `product-card.mapper.ts`
+defines a separate singular map ("Sample Pack", for a single item) rather
+than deriving one from the other by string concatenation. These are
+different content for different contexts that happen to share the same
+six `ProductType` slugs — not the same value duplicated, so this isn't
+the "colocate what's private, extract what's shared" case from
+docs/component-principles.md; sharing one map and mechanically
+pluralizing would have been the more "clever" option, not the more
+correct one.
+
+**Product type renders as plain Caption-style text, not the `Badge`
+pill component.** docs/design-system.md's "Product card anatomy" table
+lists two separate rows: "Product type" (Caption style — plain metadata
+text) and "Badges" (a `Badge` pill, reserved for *derived* flags —
+`featured`, `salePrice !== null`). The task brief's "product type
+badge/label" phrasing could read either way; design-system.md's own
+table is the more specific, more authoritative source, so product type
+is rendered as text (`text-xs font-medium text-muted-foreground`), and
+`Badge` is left unused here — there's no `featured`/sale badge in this
+pass since it wasn't asked for, and adding one would be scope beyond
+what this branch's brief specified.
+
+**Metadata stacking order (title, producer, type, then price) comes
+directly from design-system.md's own spacing section**, not a layout
+guess: "Gap between stacked metadata lines (title/producer/type)... Gap
+before price: sm (12px)" explicitly lists that order and distinguishes
+the tight intra-group gap from the larger pre-price gap. Implemented as
+`gap-1` (4px) within the title/producer/type block and `mt-3` (12px)
+before the price row.
+
+**Artwork placeholder: a quiet `--muted` fill with a small decorative
+icon, never a fake image.** `ProductCardArtwork` is `null` when
+`MusicProduct.artwork` is `null` — no default/stock image URL exists
+anywhere in this component, matching the task brief's "no placeholder
+images, no fake artwork" and design-system.md's own guidance ("a quiet
+placeholder fill using `--muted`, not a broken-image icon"). A small
+`lucide-react` `Music2` glyph is centered in the fill for a slightly
+more finished empty state than a bare gray square; it's `aria-hidden`
+since the card's accessible name already comes from its visible text.
+
+**The whole card is one `next/link`, not multiple nested links.** A
+common alternative pattern links the image and title separately; that
+creates duplicate tab stops for what's functionally one destination and
+risks an ambiguous accessible name. Wrapping the entire `Card` in a
+single `Link` gives one tab stop whose accessible name is its full text
+content (image alt + title + producer + type + price) — verified via a
+keyboard-navigation check (`Tab` lands on one `<a>` whose `href` is the
+mapped `routes.products.detailPath(slug)` and whose text content
+includes all four visible fields) rather than assumed.
+
+**`next.config.ts` now derives an `images.remotePatterns` entry from
+`NEXT_PUBLIC_GRAPHQL_ENDPOINT`.** `next/image` (used for real artwork)
+refuses to load from any host not explicitly allow-listed, and product
+artwork is served by the same WordPress backend GraphQL already reads
+from — so the allowed host is parsed from the existing endpoint URL
+rather than adding a second hardcoded domain. Wrapped in a `try`/`catch`
+returning no remote patterns on a missing or malformed URL rather than
+throwing: `lib/env.ts` is where that variable's presence is meant to be
+validated for the running app, not `next.config.ts`, which runs before
+any of that and shouldn't hard-crash a build over it.
+
+**Verified visually, not just by type/lint checks.** `app/dev/product-card`
+(temporary, unlinked — same convention as `app/dev/products`) renders
+`ProductCard` against three fixture `MusicProduct` objects (real artwork,
+real artwork + sale price, `artwork: null`) run through the actual
+`toProductCard` mapper. Screenshotted via a headless-Chromium script to
+confirm: artwork sits flush against the card's rounded top corners with
+no fake images, the null-artwork placeholder renders as a quiet muted
+fill, a long title truncates to two lines, sale pricing shows a
+struck-through regular price beside the sale price, and keyboard `Tab`
+reaches one focusable link per card with a visible focus ring matching
+the card's rounded shape.
