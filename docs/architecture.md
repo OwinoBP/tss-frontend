@@ -129,7 +129,7 @@ components/
   layout/       Container, Section, Header, Navigation, Footer, SkipToContent, Shell
   commerce/     cart, checkout, pricing UI — created on first use
   music/        player, track list, waveform UI — created on first use
-  marketing/    landing/promo sections — created on first use
+  marketing/    Hero, ShopByType — landing/promo sections
   common/       shared, feature-agnostic UI (e.g. Logo)
 lib/
   apollo/       Apollo Client setup — client + provider (browser), rsc-client (server), links

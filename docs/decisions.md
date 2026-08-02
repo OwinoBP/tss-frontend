@@ -484,3 +484,72 @@ consequence of introducing the Shell, not a redesign of any of those
 pages' content, and within scope even for the untouched homepage (`app/page.tsx`
 still displays the identical create-next-app boilerplate content — only
 its outermost tag changed).
+
+## Homepage: editorial shell only, no ProductCard dependency
+
+`feature/homepage` is the first branch in the post-Milestone-1 roadmap,
+ahead of `feature/product-card` and `feature/product-grid`. Scope was
+confirmed before implementation rather than assumed: the homepage renders
+two `components/marketing/` sections — `Hero` and `ShopByType` — with no
+live WooCommerce product data and no dependency on `ProductCard`, which
+doesn't exist yet. A "featured products" section is deferred to whichever
+branch first has a real card component to render, rather than building a
+one-off inline product preview here that `ProductCard` would immediately
+duplicate or replace.
+
+**`Hero`** renders the page's one H1 from `storeConfig.identity.tagline`
+(written for customer-facing use) — deliberately not
+`identity.description`, which names "headless WooCommerce" and is written
+for internal/SEO use, not a storefront visitor. Above it, a small
+catalog-scope line enumerates the six `ProductType` values
+(types/music-product.ts) verbatim rather than inventing brand copy —
+factual and already-decided content, not a marketing claim needing
+client sign-off. Two CTAs (`routes.products.index`, `routes.productTypes.index`)
+point at routes that have no page yet, consistent with `Navigation`'s
+existing precedent of linking ahead of the pages that will serve them
+(see "Navigation scope" above).
+
+**`ShopByType`** is a text-only grid of the same six `ProductType` values,
+each linking via `routes.productTypes.detailPath(slug)` — the first real
+caller of that route builder. Display labels are colocated as a local
+const in the component file rather than extracted to `data/`, following
+`Navigation`'s own `DEFAULT_ITEMS` precedent: a list with exactly one
+consumer today doesn't earn a shared location yet.
+
+**Two pre-existing gaps were fixed while wiring this up, not worked
+around:**
+
+1. `app/globals.css`'s `@theme inline` block defined `--font-sans: var(--font-sans)`
+   — a self-reference flagged in docs/design-system.md as a known wiring
+   gap "for whoever implements this system" to fix. Implementing the
+   first real typography (`Hero`'s H1) was that moment; changed to
+   `var(--font-geist-sans)`, matching how `--font-mono` was already wired.
+2. `app/layout.tsx`'s `metadata` still had create-next-app's literal
+   `"Create Next App"` title/description. Replaced with
+   `storeConfig.identity.name` / `storeConfig.seo.titleTemplate` /
+   `storeConfig.seo.defaultDescription` — config that already existed
+   for exactly this purpose but had no caller yet.
+
+**A third issue was a real bug, not a pre-existing known gap: `Section`'s
+`heading` prop rendered outside any `Container`.** `Section` (introduced
+in the layout-foundation branch) had no prior consumer of `heading` — a
+grep across the whole codebase before this branch confirmed zero call
+sites. Passing `heading="Shop by Type"` alongside a caller-supplied
+`Container` wrapping only `children` left the heading flush against the
+viewport edge with no horizontal padding at all, confirmed visually
+(screenshot showed the H2 starting at `x=0` while the grid below it,
+inside `Container`, was correctly inset) before being fixed. This wasn't
+a bug specific to how `ShopByType` used `Section` — `heading` had no
+`Container` of its own to opt into regardless of caller, so it was
+unconditionally broken for any future consumer.
+
+**Fixed by making `Section` own a `Container` internally** (new
+`containerVariant` prop, default `"content"`) wrapping both `heading` and
+`children` together, rather than leaving containment to the caller. This
+is a fix at the source, not a per-consumer workaround: `Hero` and
+`ShopByType` both dropped the `Container` they had been wrapping their
+own children in, now relying on `Section`'s. Same reasoning as the
+`toResponsiveVars` extraction in the layout-foundation branch — fix
+shared layout infrastructure at first real use rather than let every
+future `Section` consumer either duplicate the heading's container or
+rediscover the same misalignment.
