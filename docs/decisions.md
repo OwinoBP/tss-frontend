@@ -675,3 +675,64 @@ fill, a long title truncates to two lines, sale pricing shows a
 struck-through regular price beside the sale price, and keyboard `Tab`
 reaches one focusable link per card with a visible focus ring matching
 the card's rounded shape.
+
+## ProductGrid: stays dumb on purpose, and a `toResponsiveVars` limit found by testing
+
+`feature/product-grid` adds `components/commerce/ProductGrid` — a single
+component that arranges `ProductCardProps[]` into a responsive grid. Two
+decisions worth recording.
+
+**`ProductGrid` takes `ProductCardProps[]`, not `MusicProduct[]`.** The
+alternative — accepting `MusicProduct[]` and calling `toProductCard`
+internally — would make call sites slightly shorter, but it would also
+give `ProductGrid` a dependency on the domain model it doesn't need to
+have. As written, `ProductGrid` only knows "arrange `ProductCardProps`
+into a grid"; it stays composable with anything that already produces
+that shape, and every real consumer (`feature/product-catalog`, a future
+producer page, a future "related products" rail) calls
+`products.map(toProductCard)` once at its own call site instead. Keyed by
+`product.href` (unique per product, already present on the prop) rather
+than adding an `id` field to `ProductCardProps` just for this — that
+would widen the card's props with a field it doesn't render, which is
+exactly what `ProductCardProps` was introduced to avoid (see the
+ProductCard ADR above).
+
+**No loading state, no empty state, no pagination — deliberately.**
+`ProductGrid` renders nothing for an empty array and has no opinion about
+what "no results" should look like; both are page-level concerns
+(`feature/product-catalog` owns fetching, filters, and empty/error UX).
+Building either into the grid now would be building ahead of a real
+requirement for how that page wants to present it.
+
+**A second, real bug found by inspecting compiled CSS rather than
+assuming the established pattern would extend cleanly.** The first
+attempt wired `productGridDefaults.columns` through the same
+`toResponsiveVars` + `grid-cols-(--var)` custom-property technique
+already proven for padding/gap (`Container`/`Section`/`Footer`). It
+compiles without error, but `grid-template-columns` needs a full track
+list (`repeat(N, minmax(0, 1fr))`); substituting a bare `var(--x)` that
+resolves to a plain number (`1`, `2`...) is syntactically-valid-looking
+but semantically invalid CSS, silently dropped by the browser. Caught by
+grepping the actual compiled stylesheet before shipping it, per this
+project's standing practice of verifying generated CSS rather than
+assuming a pattern transfers (see the layout-foundation ADR above).
+Fixed by reverting to the technique `ShopByType` already uses for its own
+responsive column counts — literal Tailwind classes
+(`grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4`) — with a
+comment tying the numbers back to `productGridDefaults.columns` as their
+source of truth, since Tailwind can't statically see a class name built
+from a config value regardless of technique. Gutter still uses
+`toResponsiveVars` correctly: `gap` accepts a plain length, so
+`gap: var(--product-grid-gutter-mobile)` (resolving to `16px`) is valid
+where `grid-template-columns: var(--product-grid-columns-mobile)`
+(resolving to `1`) is not — confirmed by inspecting both in the compiled
+output.
+
+**Verified visually across all four responsive tiers**, not just at one
+viewport: `app/dev/product-grid` (temporary, unlinked, same convention as
+the other `app/dev/*` pages) renders eight fixture products — a mix of
+real artwork, `artwork: null`, and sale pricing — through
+`toProductCard`. Screenshotted at mobile/tablet/desktop/large-desktop
+widths, confirming 1/2/3/4 columns and 16px/16px/24px/24px gutters
+matching `productGridDefaults` exactly, with no console errors at any
+tier.

@@ -127,7 +127,7 @@ app/            routing only — pages, layouts, route handlers
 components/
   ui/           shadcn primitives (unstyled building blocks)
   layout/       Container, Section, Header, Navigation, Footer, SkipToContent, Shell
-  commerce/     ProductCard — cart, checkout, pricing UI still created on first use
+  commerce/     ProductCard, ProductGrid — cart, checkout, pricing UI still created on first use
   music/        player, track list, waveform UI — created on first use
   marketing/    Hero, ShopByType — landing/promo sections
   common/       shared, feature-agnostic UI (e.g. Logo)
