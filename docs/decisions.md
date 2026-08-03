@@ -736,3 +736,125 @@ real artwork, `artwork: null`, and sale pricing — through
 widths, confirming 1/2/3/4 columns and 16px/16px/24px/24px gutters
 matching `productGridDefaults` exactly, with no console errors at any
 tier.
+
+## Product Catalog: the reusable listing pattern, pagination, loading, and error boundaries
+
+`feature/product-catalog` adds `app/products` — the first real,
+permanently-linked page in the app (`routes.products.index` and
+`Navigation`/`Hero` already pointed here with nothing behind it; see the
+homepage and ProductCard ADRs above). It's deliberately treated as the
+template every future listing page (category, brand, search, sale
+collection, related products) will copy, not a one-off: service ->
+presentation mapper -> `ProductGrid`, plus the three states a real listing
+needs — loading, empty, error — each handled by the mechanism that's
+actually correct for it, not one catch-all.
+
+**`getProductsPage` is additive, not a breaking change to `getProducts`.**
+The existing `getProducts(): Promise<MusicProduct[]>` had exactly one
+caller (`app/dev/products`, now deleted — see below) and a documented
+contract of "just the array." Rather than widen its return type (which
+would have forced every future simple caller — a homepage "featured
+products" rail, a producer page — to unwrap `.products` even when it
+never needs `pageInfo`), a new `getProductsPage` returns
+`{ products, pageInfo }`, and `getProducts` becomes a one-line wrapper
+around it. One function still does the actual fetching; two call shapes
+for two different needs.
+
+**Loading, empty, and error are three different states handled by three
+different mechanisms — not variations of one `if` chain.** This is the
+main architectural decision this branch makes, so it's worth being
+explicit about why they're not unified:
+
+- **Loading** uses Next's file-based Suspense boundary
+  (`app/products/loading.tsx`), shown automatically while the async page
+  component awaits `getProductsPage`. Nothing in the page component
+  itself branches on a loading flag.
+- **Empty** (zero products, no error) is a normal, valid business state —
+  handled as a plain conditional inside `page.tsx`
+  (`products.length === 0`). It is not routed through the error boundary,
+  because it isn't an error.
+- **Error** (the fetch actually throws — network failure, GraphQL error)
+  is handled by `app/products/error.tsx`, Next's error-boundary file
+  convention, by *not* wrapping the `getProductsPage` call in `page.tsx`
+  in a `try`/`catch` and letting it throw naturally. This replaces the
+  manual `try`/`catch` + inline error-string pattern
+  `app/dev/products`/`app/dev/graphql` used — appropriate for those quick
+  diagnostic pages, not for production UI that needs a real retry
+  affordance and shouldn't hand-roll error-message sanitization.
+
+**Verified this Next.js version's actual `error.js` contract instead of
+assuming it, per `frontend/AGENTS.md`'s standing warning that this
+Next.js version has breaking changes from training-data expectations.**
+Checked `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/error.md`
+directly: this version's error boundary exposes `unstable_retry()` as the
+primary recovery function (`reset()` still exists but is now documented
+as the fallback for a narrower case), and — usefully — confirms Next
+already replaces a thrown Server Component error's message with a
+generic message plus a `digest` in production, specifically to avoid
+leaking internal details to visitors. `app/products/error.tsx` was
+written against that confirmed contract, and its own `console.error` is
+there only to correlate that `digest` with server-side logs, not to
+recover or re-display the original message client-side.
+
+**Pagination is forward-only (`?after=<cursor>`), not numbered pages —
+a real constraint of the data, not a shortcut.** `PRODUCTS_QUERY` (built
+in an earlier branch) only requests WPGraphQL's forward Relay connection
+args (`first`/`after`, `hasNextPage`/`endCursor`), not the backward ones
+(`last`/`before`, `hasPreviousPage`/`startCursor`). A cursor-based "Next"
+link, with the browser's own back button covering "previous" (each
+"Next" is a real navigation to a new URL, so back just re-requests the
+prior `after` value), is the correct pattern for what's actually wired up
+today — adding numbered/jump-to-page navigation would need those backward
+args added to the query first, which nothing has required yet. Documented
+here as a deliberate scope boundary, not a gap (see Future Enhancements
+in the deliverables for this branch).
+
+**`?after=` pages are deliberately non-canonical for SEO.** Cursor
+pagination has no stable, guessable URL per page number, so indexing
+`/products?after=...` variants directly risks duplicate-content
+treatment with no real benefit — crawlers still reach every product by
+following `Next` links from the canonical `/products`. `generateMetadata`
+sets `alternates.canonical` back to `routes.products.index` and
+`robots: { index: false, follow: true }` whenever `after` is present.
+
+**`ProductCardSkeleton`/`ProductGridSkeleton` are new, and deliberately
+share layout code with the real components, not just their visual
+proportions.** `product-grid-layout.ts` (className + `toResponsiveVars`
+style) is imported by both `ProductGrid` and `ProductGridSkeleton` — the
+alternative (each hand-rolling matching Tailwind classes) risks the two
+silently drifting apart, which defeats the entire purpose of a skeleton
+(a loading state that doesn't match its own loaded layout causes the
+layout shift it exists to prevent). `motion-safe:animate-pulse` (not a
+bare `animate-pulse`) keeps the pulse animation off entirely under
+`prefers-reduced-motion`, per docs/design-system.md's Motion principles.
+`ProductGridSkeleton`'s wrapper carries `role="status"`/`aria-label`
+once, at the region level; individual `ProductCardSkeleton`s stay
+`aria-hidden` so assistive tech isn't told "loading" eight times over.
+
+**`app/dev/products` deleted.** Its own header comment already documented
+exactly this trigger — "safe to delete once real product pages exist" —
+and `app/products` is now that real page. Keeping both would have meant
+two different (and, after this branch, differently-behaved) code paths
+fetching the same data. `app/dev/product-card` and `app/dev/product-grid`
+were kept: unlike `app/dev/products` (which only ever proved the
+fetch-to-render pipeline worked), they're isolated component fixtures —
+still useful for visually checking `ProductCard`/`ProductGrid` in
+isolation from a real page or live backend state, which is a genuinely
+different job than what `app/products` now does. `app/dev/product-grid`
+was extended with a `ProductGridSkeleton` fixture rather than given its
+own new dev route, for the same reason.
+
+**Verified against the live backend, not just fixtures — including the
+error path.** The WPGraphQL endpoint (`tss.maabara.local`) is actually
+reachable from this environment, and the store currently has zero real
+products (consistent with earlier schema-investigation ADRs), so the
+empty state shown in the screenshot below is the *real* production
+behavior today, not a simulated fixture. The error boundary was verified
+by running a second, temporary dev server instance with
+`NEXT_PUBLIC_GRAPHQL_ENDPOINT` overridden to an unreachable host (an
+environment-variable override for that one process only — `.env.local`
+was never touched) and confirming `error.tsx` renders instead of the app
+crashing. `next build` was also run to confirm the route compiles for
+production and is correctly reported as dynamically rendered (`ƒ`, not
+statically prerendered) — expected, since reading `searchParams` opts a
+page into per-request rendering.

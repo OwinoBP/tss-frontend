@@ -120,6 +120,15 @@ This keeps GraphQL response shapes, fetch policies, and error handling out
 of components entirely, and means the schema can change without touching
 UI code (only the mapper that translates it).
 
+A service function that fetches a *page* of a connection — `getProductsPage`
+today, the pattern for any future paginated listing (category pages,
+search results, collections) — returns both the mapped domain data and
+the connection's `pageInfo` (`hasNextPage`/`endCursor`), not just the flat
+array. Pages consume `pageInfo` to render "next page" navigation; a
+`getX` wrapper (e.g. `getProducts`) stays available for callers that only
+ever want the flat list. See docs/decisions.md, "Product Catalog" for the
+full reasoning.
+
 ## Folder philosophy
 
 ```
@@ -127,7 +136,7 @@ app/            routing only — pages, layouts, route handlers
 components/
   ui/           shadcn primitives (unstyled building blocks)
   layout/       Container, Section, Header, Navigation, Footer, SkipToContent, Shell
-  commerce/     ProductCard, ProductGrid — cart, checkout, pricing UI still created on first use
+  commerce/     ProductCard, ProductGrid (+ their Skeleton loading states) — cart, checkout, pricing UI still created on first use
   music/        player, track list, waveform UI — created on first use
   marketing/    Hero, ShopByType — landing/promo sections
   common/       shared, feature-agnostic UI (e.g. Logo)

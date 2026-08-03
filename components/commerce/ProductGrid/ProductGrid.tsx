@@ -1,7 +1,7 @@
 import { ProductCard } from "@/components/commerce/ProductCard";
 import type { ProductCardProps } from "@/components/commerce/ProductCard";
-import { productGridDefaults } from "@/lib/config";
-import { cn, toResponsiveVars } from "@/lib/utils";
+import { PRODUCT_GRID_CLASSNAME, productGridStyle } from "./product-grid-layout";
+import { cn } from "@/lib/utils";
 
 export interface ProductGridProps {
   /** Already-mapped card data — see product-card.mapper.ts. `ProductGrid` never sees `MusicProduct`. */
@@ -26,19 +26,16 @@ export interface ProductGridProps {
  * (`repeat(N, minmax(0, 1fr))`), and a bare `var(--x)` substituting just
  * the number `N` compiles but is invalid CSS — confirmed by inspecting
  * the actual compiled output, not assumed (see docs/decisions.md).
+ *
+ * Layout (className + style) lives in `product-grid-layout.ts`, shared
+ * with `ProductGridSkeleton` so a loading state never drifts out of sync
+ * with its loaded layout.
  */
 export function ProductGrid({ products, className }: ProductGridProps) {
   return (
     <ul
-      style={toResponsiveVars("product-grid-gutter", productGridDefaults.gutter)}
-      className={cn(
-        "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4",
-        "gap-(--product-grid-gutter-mobile)",
-        "md:gap-(--product-grid-gutter-tablet)",
-        "lg:gap-(--product-grid-gutter-desktop)",
-        "2xl:gap-(--product-grid-gutter-large-desktop)",
-        className,
-      )}
+      style={productGridStyle()}
+      className={cn(PRODUCT_GRID_CLASSNAME, className)}
     >
       {products.map((product) => (
         <li key={product.href}>

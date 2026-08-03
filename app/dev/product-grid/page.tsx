@@ -1,4 +1,4 @@
-import { ProductGrid } from "@/components/commerce/ProductGrid";
+import { ProductGrid, ProductGridSkeleton } from "@/components/commerce/ProductGrid";
 import { toProductCard } from "@/components/commerce/ProductCard";
 import type { MusicProduct, ProductType } from "@/types/music-product";
 
@@ -55,6 +55,11 @@ export default function ProductGridDevPage() {
     <div style={{ padding: 24 }}>
       <h1 style={{ fontFamily: "monospace", marginBottom: 24 }}>ProductGrid</h1>
       <ProductGrid products={FIXTURES.map(toProductCard)} />
+
+      <h1 style={{ fontFamily: "monospace", margin: "48px 0 24px" }}>
+        ProductGridSkeleton
+      </h1>
+      <ProductGridSkeleton count={4} />
     </div>
   );
 }
