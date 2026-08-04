@@ -450,6 +450,25 @@ Badges row itself unused for now since nothing in this pass needed
 
 ---
 
+## Product detail anatomy
+
+Implemented in `app/products/[slug]` + `components/commerce/ProductGallery`,
+`ProductInfo`, `ProductMeta` (`feature/product-detail`). A richer view of
+the same `MusicProduct` `ProductCard` summarizes — same restraint, same
+artwork-first priority, more room to show it.
+
+| Element | Source | Notes |
+|---|---|---|
+| Gallery | `artwork`, `gallery` | Primary image large, 1:1 (same Image Ratio rule as the card); additional `gallery` images shown as a smaller static row beneath. No click-to-swap/lightbox yet — see docs/decisions.md for why that's deferred rather than built against no real multi-image data to validate it. |
+| Title | `title` | A semantic `<h1>` (one per page) but sized like **H4**, not Display/H1 — this is the one explicit typographic exception the Typography table already calls out ("product title in a detail view"), so artwork stays the visual focal point even on the page most about a single product. |
+| Price | `regularPrice`, `salePrice` | Same regular/sale treatment as the card (Geist Mono, strikethrough + emphasis), rendered larger (`ProductPricing`'s `lg` size) since there's room and it's a primary decision point here, not secondary metadata. |
+| Description | `description` | Rendered as real HTML (WordPress-admin-authored WooCommerce content — see docs/decisions.md for the trust boundary), Body size, restrained list/paragraph spacing. Not shown on the card. |
+| Meta | `producer`, `productType`, `categories`, `tags` | Grouped separately below price/description (`ProductMeta`), a simple label/value list — categories linked (a real route exists), tags plain (no tag-browsing route exists yet, not invented speculatively), producer linked only once real producer data exists (currently always a placeholder, same as the card). |
+| Breadcrumbs | — | Home → Products → [title], per Navigation Principles below — this page is exactly the "more than two levels from home" case that rule describes. |
+| Layout | — | Two columns at desktop/tablet (gallery, info), one column mobile — same responsive tiers as everywhere else in this system, no new breakpoint behavior. |
+
+---
+
 ## Navigation principles
 
 - **Quiet by default.** Navigation is a tool for getting somewhere, not a

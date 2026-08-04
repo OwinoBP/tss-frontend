@@ -858,3 +858,216 @@ crashing. `next build` was also run to confirm the route compiles for
 production and is correctly reported as dynamically rendered (`ƒ`, not
 statically prerendered) — expected, since reading `searchParams` opts a
 page into per-request rendering.
+
+## Product Detail: presentation-layer refactors, the `errorPolicy: "all"` pitfall, and a real Next.js 16 breaking change
+
+`feature/product-detail` adds `app/products/[slug]` — the second page
+architecture pattern (see docs/architecture.md, "Page architecture
+patterns"). Most of the architectural decisions here (`getProduct`'s
+`errorPolicy`, the fragment rename, `ProductPricing` as presentation-only,
+`ProductMeta` as a separate component, rendering trusted HTML) were
+proposed in planning and approved before implementation — this entry
+records what was approved, what came up during implementation that
+planning couldn't have caught, and why.
+
+### GraphQL fragment: reused, and renamed
+
+`PRODUCT_CARD_FRAGMENT` (`graphql/fragments/product-card.fragment.ts`)
+was renamed to `PRODUCT_FIELDS_FRAGMENT`
+(`graphql/fragments/product.fragment.ts`) and is now interpolated by both
+`products.query.ts` (listing) and the new `product.query.ts` (detail).
+No new fragment was created, and the existing one wasn't split: inspecting
+it before writing any code showed it already selected every field
+`WooCommerceProductDto`/`MusicProduct` needs — including `description`
+and `galleryImages`, neither of which `ProductCard` renders — because the
+fragment's actual job was always "populate a full `MusicProduct`," not
+"populate a card." The "card" name was accurate only in the sense that
+`ProductCard` happened to be its first consumer, not in what it selected.
+Splitting it into a leaner card-only fragment plus a separate
+detail-only one would have meant maintaining two selection sets for data
+that's already identical, for no over-fetching this branch actually has.
+
+### `getProduct`'s `errorPolicy: "all"`: right call, wrong first implementation
+
+The plan (approved) was: use `errorPolicy: "all"` because a nonexistent
+slug is a valid application state (confirmed live: WPGraphQL returns
+`data.product: null` *with* a GraphQL error attached), and let genuine
+transport/GraphQL failures still propagate to `error.tsx`. The first
+implementation checked `!data?.product` and returned `null` for both
+"not found" and "no response at all" — which meant a live end-to-end test
+against a totally unreachable backend rendered the **not-found page**,
+not the error boundary. This surfaces the exact ambiguity the
+`errorPolicy` choice was supposed to resolve, just one layer down.
+
+**Root cause, confirmed by logging both cases against the real result
+object rather than guessing:** `errorPolicy: "all"` in this Apollo Client
+version doesn't only suppress *GraphQL-level* errors — it suppresses
+*all* errors uniformly (network failures included), returning
+`{ data: undefined, error }` instead of rejecting the promise. The
+resolved shape differs by case in a way that *is* reliably
+distinguishable, just not by the field this code was checking:
+
+| Case | `data` | `error` |
+|---|---|---|
+| Real not-found (bad slug, backend reachable) | `{ product: null }` — **present** | `CombinedGraphQLErrors` |
+| Real fault (backend unreachable) | `undefined` — **absent** | present, different shape |
+
+Fixed by checking `data` itself, not `data.product`: `if (!data) throw
+error ?? new Error(...)`, then `data.product` is checked separately for
+the true not-found case. This is a materially different check, not a
+rewording of the first attempt — verified by re-running both the
+real-not-found and unreachable-backend cases after the fix and confirming
+each now lands on the correct page (`not-found.tsx` vs. `error.tsx`
+respectively). The lesson generalizes beyond this one function:
+`errorPolicy: "all"` answers "did this throw," not "did this fully
+succeed" — code that needs to tell "empty but valid" apart from "broken"
+has to inspect the actual shape of what came back, not infer it from the
+policy name.
+
+### `next.config.ts`: a real Next.js 16 breaking change, not a config mistake
+
+Real WooCommerce product images (via a temporary test product — see
+below) failed to load through `next/image` with `"url" parameter is not
+allowed` — a generic-sounding 400 that looked at first like the
+`remotePatterns` configuration from the ProductCard branch was wrong.
+Testing `remotePatterns` matching directly against Next's own
+`match-remote-pattern.js` confirmed the configured pattern was correct;
+the actual rejection, only visible in the dev server's own log (not the
+HTTP response body), was `"upstream image ... resolved to private ip
+[127.0.0.1]"`. This is Next.js 16's new SSRF-protection default —
+confirmed against `node_modules/next/dist/docs/01-app/02-guides/upgrading/version-16.md`,
+"Local IP Restriction (Breaking change)": image optimization now refuses
+any upstream host that resolves to a private/loopback IP unless
+`images.dangerouslyAllowLocalIP` is set. `tss.maabara.local` resolves to
+`127.0.0.1` in this environment, exactly the case that guide describes.
+
+Fixed by setting `dangerouslyAllowLocalIP: process.env.NODE_ENV ===
+"development"` — **scoped to development only**, deliberately. This
+flag exists specifically to prevent a server from being tricked into
+fetching internal/private network resources; a production deployment's
+`NEXT_PUBLIC_GRAPHQL_ENDPOINT` is expected to be a real public domain
+that would never resolve to a private IP, so production keeps the full
+protection this flag exists to provide. Enabling it unconditionally would
+have "fixed" local dev by silently weakening a production security
+control that production doesn't even need weakened. Caught only because
+this branch's plan included testing against a real WooCommerce product
+with real images, rather than fixtures alone — every prior branch's
+`next/image` usage had only been exercised against local `/public` SVGs
+(no remote fetch involved) or, on the catalog page, an empty result set.
+
+### Presentation-layer consolidation: `ProductPricing` and `ProductImage`
+
+Both approved in planning, with one refinement that came up during
+implementation. `ProductImage` (`components/commerce/ProductImage/`) —
+the "real photo, 1:1, or a quiet `--muted` placeholder" logic — was
+factored out of `ProductCard`'s inline JSX per the reviewer's specific
+guidance to keep `ProductGallery` from re-accumulating that same logic; it
+turned out to be exactly the piece both `ProductCard` and `ProductGallery`
+needed, so both now compose it instead of either owning image-or-
+placeholder rendering itself.
+
+**Bug caught before shipping, not after:** the first version of
+`ProductImage` applied its `className` prop only to the `<Image>` element,
+not the placeholder branch. That's invisible in `ProductCard` (its
+`Card` ancestor already clips/rounds everything via its own
+`overflow-hidden rounded-xl`), but `ProductGallery` has no such ancestor
+— its own rounded corners came from `className` passed straight to
+`ProductImage`. With the original implementation, a real image would
+render rounded and a placeholder would render square, inconsistently,
+purely depending on which branch happened to render. Fixed by moving
+`className` to the outer clipping `<div>` (present in both branches)
+instead of the inner `<Image>` — found by reasoning through the
+placeholder-in-`ProductGallery` case specifically, not by visual
+inspection alone (a bare gray square with unrounded corners next to
+rounded real-image tiles would have been an easy thing to miss in a
+screenshot at a glance).
+
+`ProductPricing` (`components/commerce/ProductPricing/`) took the
+regular/strikethrough-plus-sale-emphasized rendering out of `ProductCard`
+and added a `size: "sm" | "lg"` variant for the detail page's more
+prominent price. Per the reviewer's explicit instruction, it receives
+only `regularPrice`/`salePrice`/`size` — already-formatted display
+strings and a rendering-context choice, never a `MusicProduct` or price
+math of its own.
+
+### Two more real duplications, extracted rather than copy-pasted
+
+Building `product-info.mapper.ts` needed the exact same singular
+`ProductType` label map and the exact same `Money -> formatted string`
+logic already private to `product-card.mapper.ts` — unlike the
+ProductCard-vs-ShopByType label case (different content, correctly kept
+separate), these are genuinely the same logic needed a second time.
+`PRODUCT_TYPE_LABELS` moved to `data/product-types.ts` (the first file in
+that directory — anticipated in docs/architecture.md's folder philosophy
+since the homepage branch, never populated until now), and `formatMoney`
+moved to `lib/format-money.ts` (a filename component-principles.md's own
+naming-conventions section already used as its example of kebab-case
+naming, before this file existed). Both mappers now import from these
+shared locations instead of each carrying a private copy.
+
+### `ProductMeta`: a separate component, fed by one mapper
+
+Per the reviewer's optional suggestion, producer/type/categories/tags
+were split into their own `ProductMeta` component rather than staying
+inline in `ProductInfo`. It doesn't get its own `toProductMeta` mapper,
+though: `product-info.mapper.ts` produces the full nested shape
+(including `meta`), and `ProductInfo` passes that straight through to
+`ProductMeta`. Components don't call mappers themselves anywhere in this
+codebase (pages do, then pass already-mapped props down — see
+`ProductGrid`'s ADR above) — a second, independent mapper would have
+meant either breaking that rule or the page making two calls for what is,
+today, one page region with one real consumer. `ProductMetaProps` is
+still its own real type, so the component stays independently reviewable
+and composable even though it's currently only ever fed one way.
+
+**Producer stays unlinked; tags stay unlinked; categories link.**
+`producer.slug` is currently always `""` (the mapper-level placeholder
+documented since the original product-query branch) — linking it would
+build a broken `/producers/` URL, so `product-info.mapper.ts` only
+supplies an `href` when a real slug exists. Tags have no
+`routes.tags` — inventing one now, ahead of any tag-browsing page
+actually existing, would be exactly the kind of speculative addition this
+project avoids elsewhere (see `ShopByType`'s and `Navigation`'s own ADRs).
+Categories link, because `routes.categories.detailPath` already exists
+and category data is real, not a placeholder.
+
+### Rendering `descriptionHtml` via `dangerouslySetInnerHTML`
+
+Approved explicitly, with the trust boundary worth stating precisely:
+`MusicProduct.description` is confirmed live (via a temporary real
+WooCommerce product) to come back as WordPress-rendered HTML —
+`<p>`, `<strong>`, `<ul><li>` — not plain text. This is
+**WordPress-admin-authored content**: written by whoever manages the
+store's catalog through wp-admin, the same trust level this headless
+setup already extends to any other WordPress content it renders. It is
+categorically not user-submitted input (no reviews, comments, or public
+submissions flow through this field anywhere in the app), so this isn't
+the general "never render arbitrary HTML" case — the standard defensive
+answer (strip tags, render plain text) was rejected because it would
+have discarded real admin-authored formatting for a risk that specific to
+this field, doesn't apply. `<meta name="description">` still gets a
+separately tag-stripped, truncated plain-text version
+(`stripHtml` in `app/products/[slug]/page.tsx`) — search engines expect
+plain text there regardless of the body's trust level, a different
+concern from what's safe to render in a browser DOM.
+
+### Verified against a real WooCommerce product, deliberately including a gallery
+
+Per the reviewer's approval, a temporary product was created via
+`wp wc product create` — three real imported images (a primary plus two
+gallery images, so `ProductGallery`'s secondary-image path actually
+rendered against real multi-image data, not just a fixture), a real
+category and two real tags, a regular and sale price, and an HTML
+description with a list — then queried directly via `curl` against the
+live GraphQL endpoint (confirming the HTML-description finding above)
+before ever touching the Next.js app, and finally rendered through the
+real `/products/[slug]` route and screenshotted. Categories rendered as
+linked badges (confirmed by tabbing to one and checking its `href`),
+`<title>`/meta description/`og:image` all matched the real product, and
+the not-found path was independently re-confirmed against a real bad
+slug on the same live backend (`robots: noindex`, correct copy). The
+product, category, tags, and imported media were deleted immediately
+after, and the store was confirmed back to its original state (zero
+products, only the pre-existing default WooCommerce placeholder
+attachment) — the same "leave it exactly as found" discipline the
+original product-query branch established.

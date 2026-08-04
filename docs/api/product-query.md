@@ -1,13 +1,16 @@
 # Product query
 
-The first real WooCommerce product integration. This documents what
-`graphql/queries/products.query.ts` retrieves, how it becomes a
+The WooCommerce product integration — both the listing query
+(`graphql/queries/products.query.ts`) and the single-product query
+(`graphql/queries/product.query.ts`, added in `feature/product-detail`).
+This documents what each retrieves, how the response becomes a
 `MusicProduct`, and what's deliberately not requested yet.
 
 ## Pipeline
 
 ```
-GraphQL Query (graphql/queries/products.query.ts, graphql/fragments/product-card.fragment.ts)
+GraphQL Query (products.query.ts or product.query.ts, both built on
+               graphql/fragments/product.fragment.ts)
    │  Apollo Client, via lib/apollo/rsc-client.ts
    ▼
 DTO (WooCommerceProductDto — types/dto/woocommerce-product.dto.ts)
@@ -19,25 +22,36 @@ Mapper (services/mappers/product.mapper.ts)
 MusicProduct (types/music-product.ts)
    │  what everything downstream depends on
    ▼
-Service (services/product.service.ts — getProducts)
-   │  runs the query, filters non-SimpleProduct nodes, maps, returns MusicProduct[]
+Service (services/product.service.ts — getProductsPage/getProducts, getProduct)
+   │  runs the query, filters non-SimpleProduct nodes, maps, returns
+   │  MusicProduct[] (list) or MusicProduct | null (single)
    ▼
-Server Component (app/dev/products/page.tsx)
-   │  calls getProducts(), renders — has no GraphQL/Apollo knowledge at all
+Server Component (app/products/page.tsx, app/products/[slug]/page.tsx)
+   │  calls the service, renders — has no GraphQL/Apollo knowledge at all
 ```
 
+Both queries share one fragment (`PRODUCT_FIELDS_FRAGMENT`) rather than
+each defining their own selection set — see docs/decisions.md, "Product
+Detail" for why splitting them would have added maintenance cost with no
+corresponding benefit (the fragment already selects everything
+`MusicProduct` needs, not a card-specific subset, despite its former
+name).
+
 Verified live, end to end, against this project's actual WPGraphQL
-endpoint: a temporary WooCommerce product was created via `wp wc product
-create` (with a category, a tag, a featured image, a regular and sale
-price), fetched through `/dev/products`, confirmed to render correctly
-mapped data, then deleted — the store has no real products yet, so this
-was the only way to confirm the mapper against real data rather than only
-against the empty-catalog case. See "WooCommerce limitations discovered"
-below for what that test surfaced.
+endpoint, twice: once for the listing query (a temporary WooCommerce
+product created via `wp wc product create` — category, tag, featured
+image, regular and sale price — fetched, confirmed correctly mapped,
+then deleted), and again for the single-product query in
+`feature/product-detail` (a second temporary product, this time with a
+real image gallery and an HTML-formatted description, confirmed via a
+direct `curl` against the GraphQL endpoint and then through the real
+`/products/[slug]` route, then deleted). The store has no real products
+outside these temporary, cleaned-up tests. See "WooCommerce limitations
+discovered" below for what each surfaced.
 
 ## Fields currently retrieved, and why
 
-| Field (`ProductCardFields` fragment) | MusicProduct field | Why it's included |
+| Field (`ProductFields` fragment) | MusicProduct field | Why it's included |
 |---|---|---|
 | `__typename` | — (used by the service, not the domain model) | Every node in `products.nodes` is typed `Product` (the shared interface); this is how the service tells a real `SimpleProduct` apart from any other concrete type before treating it as a `WooCommerceProductDto` |
 | `id` | `id` | Stable identity |
@@ -104,6 +118,40 @@ domain truths).
 One field *did* need a type change: `artwork` is now `ProductImage | null`
 — a product genuinely can have no image set, permanently, which is
 different from the placeholder situation above. See docs/decisions.md.
+
+## The single-product query (`product.query.ts`)
+
+```graphql
+query Product($slug: ID!) {
+  product(id: $slug, idType: SLUG) {
+    ... on SimpleProduct {
+      ...ProductFields
+    }
+  }
+}
+```
+
+`product(id, idType: SLUG)` was confirmed via live introspection to be
+the correct, non-deprecated root field (`simpleProduct` also exists and
+returns `SimpleProduct` directly, avoiding the inline fragment, but is
+schema-deprecated in favor of `product` — not used here).
+
+**Confirmed live: querying a slug that doesn't exist returns
+`data.product: null` together with a top-level GraphQL error**
+(`"No product ID was found corresponding to the slug: ..."`), not a
+clean null with no errors. This is why `product.service.ts`'s
+`getProduct` uses `errorPolicy: "all"` rather than the listing query's
+`"none"`, and why it checks `data` itself (not just `data.product`)
+before treating a null product as "not found" rather than "the request
+failed outright" — see docs/decisions.md, "Product Detail" for the full
+reasoning and the bug this distinction fixed.
+
+**Confirmed live: `description` returns rendered HTML**
+(`<p>`, `<strong>`, `<ul><li>`), not plain text — verified by creating a
+temporary product with a formatted description and querying it directly.
+This confirms the trust-boundary decision documented in docs/decisions.md
+(rendered via `dangerouslySetInnerHTML` in `ProductInfo`, since it's
+WordPress-admin-authored content, not user input).
 
 ## WooCommerce limitations discovered
 

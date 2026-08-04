@@ -109,8 +109,11 @@ shared client instance isn't safe for either case.
 `services/` is the only layer allowed to call Apollo Client directly.
 Each service (e.g. `product.service.ts`) exposes plain async functions —
 `getProduct`, `getProducts`, etc. — that return typed domain data such as
-`MusicProduct` (`types/music-product.ts`). Components import from
-services, never from `graphql/` or `lib/apollo/client.ts`.
+`MusicProduct` (`types/music-product.ts`), or `null` when a single
+resource genuinely doesn't exist (`getProduct` — see "Page architecture
+patterns" below and docs/decisions.md for why that's a valid return, not
+an error). Components import from services, never from `graphql/` or
+`lib/apollo/client.ts`.
 
 `services/mappers/` holds the transformation from a WooCommerce DTO to a
 domain type — see the GraphQL flow diagram above. A service calls its
@@ -129,31 +132,110 @@ array. Pages consume `pageInfo` to render "next page" navigation; a
 ever want the flat list. See docs/decisions.md, "Product Catalog" for the
 full reasoning.
 
+## Page architecture patterns
+
+Two page shapes are established, and future pages should extend one of
+these rather than invent a third. Both compose the same underlying
+pieces (service -> presentation mapper -> presentation components) and
+both use the same three-file Next.js convention (`loading.tsx`,
+`error.tsx`, plus whatever handles "valid but nothing to show") — they
+differ in what "nothing to show" means and how pagination applies.
+
+### Listing pages
+
+Example: `app/products` (`feature/product-catalog`).
+
+```
+service (getXPage: { items, pageInfo }) -> items.map(toXCard) -> XGrid -> page
+```
+
+- **`loading.tsx`** — a `Suspense`-boundary skeleton matching the grid's
+  real layout (`XGridSkeleton`, sharing literal layout code with the real
+  grid component so the two can't visually drift apart).
+- **Empty state** — zero results is a normal, valid business state
+  (a new store, an over-narrow filter), not an error: a plain conditional
+  inside the page component, never routed through `error.tsx`.
+- **Pagination** — cursor-based (`?after=<cursor>`), driven by the
+  service's `pageInfo.hasNextPage`/`endCursor`; "previous" relies on the
+  browser's own back navigation rather than backward cursor args the
+  underlying query doesn't request (see docs/decisions.md for why that's
+  a deliberate scope boundary, not a gap).
+- **`error.tsx`** — a thrown fetch error (network/GraphQL failure), not
+  caught in the page component, reaches this Next.js error boundary.
+- **Metadata** — `generateMetadata` sets `noindex`/canonical-back-to-page-one
+  for any non-first page, since cursor pagination has no stable per-page
+  URL worth indexing separately.
+
+### Detail pages
+
+Example: `app/products/[slug]` (`feature/product-detail`).
+
+```
+service (getX: X | null) -> toXInfo/toXGallery -> reusable presentation components -> page
+```
+
+- **`loading.tsx`** — same `Suspense` pattern, sized to the detail
+  layout (gallery + info skeletons) instead of a grid.
+- **"Nothing to show" is `notFound()`, not an empty state.** A single
+  resource either exists or it doesn't; there's no equivalent of "zero
+  results, still a valid page." The service returns `X | null`; the page
+  calls Next's `notFound()` when it's `null`, which renders
+  `not-found.tsx` (automatically `noindex`ed by Next, no manual metadata
+  needed for that case).
+- **Distinguishing "not found" from "failed" is the one subtle part.**
+  A service function returning a nullable single resource needs to tell
+  "the backend coherently said this doesn't exist" apart from "the
+  backend didn't answer at all" — those are different states requiring
+  different Apollo error-policy handling, and getting the distinction
+  wrong routes a real outage to the wrong UI. See docs/decisions.md,
+  "Product Detail" for the specific pitfall this project hit and how it
+  was actually diagnosed (by inspecting the real resolved result shape
+  for both cases, not by assumption).
+- **`error.tsx`** — same as listing pages: a genuine thrown failure,
+  never a normal "not found."
+- **Metadata** — `generateMetadata` builds `title`/`description`/`openGraph`
+  from the real fetched resource (a per-item image, unlike a listing page
+  which has no single representative image to offer).
+
+### Shared presentation components introduced for detail pages
+
+`ProductImage` (real photo, 1:1, or a quiet placeholder — never a fake
+image) and `ProductPricing` (regular/sale price display, sized `sm`/`lg`)
+were factored out of `ProductCard` once `ProductGallery`/`ProductInfo`
+needed the identical logic — both now compose these rather than
+`ProductCard` being the only place that logic lived. `Breadcrumbs`
+(`components/common/`) is fully generic (no product/commerce knowledge)
+and is the reusable piece any future page more than two levels from home
+should use, per docs/design-system.md's Navigation Principles.
+
 ## Folder philosophy
 
 ```
 app/            routing only — pages, layouts, route handlers
 components/
-  ui/           shadcn primitives (unstyled building blocks)
+  ui/           shadcn primitives + Skeleton (unstyled building blocks)
   layout/       Container, Section, Header, Navigation, Footer, SkipToContent, Shell
-  commerce/     ProductCard, ProductGrid (+ their Skeleton loading states) — cart, checkout, pricing UI still created on first use
+  commerce/     ProductCard, ProductGrid, ProductImage, ProductPricing, ProductGallery,
+                ProductMeta, ProductInfo (+ Skeleton loading states) — cart, checkout
+                still created on first use
   music/        player, track list, waveform UI — created on first use
   marketing/    Hero, ShopByType — landing/promo sections
-  common/       shared, feature-agnostic UI (e.g. Logo)
+  common/       shared, feature-agnostic UI (e.g. Logo, Breadcrumbs)
 lib/
   apollo/       Apollo Client setup — client + provider (browser), rsc-client (server), links
   env.ts        typed environment access
   config/       centralized app configuration — store.ts, routes.ts, theme.ts
+  format-money.ts  Money -> display string, shared by presentation mappers
 graphql/
-  queries/      GraphQL queries (e.g. site-info.ts, products.query.ts)
+  queries/      GraphQL queries (e.g. site-info.ts, products.query.ts, product.query.ts)
   mutations/    created on first mutation
-  fragments/    GraphQL fragments (e.g. product-card.fragment.ts)
+  fragments/    GraphQL fragments (e.g. product.fragment.ts)
 services/       the only callers of Apollo Client; UI's data contract
   mappers/      WooCommerce DTO -> domain type transformations
 hooks/          shared React hooks — created on first use
 types/          shared TypeScript types (e.g. MusicProduct)
   dto/          types mirroring WPGraphQL responses (e.g. WooCommerceProductDto)
-data/           static content (e.g. nav structure) — created on first use, distinct from lib/config — see component-principles.md
+data/           static content (e.g. product-types.ts) — distinct from lib/config — see component-principles.md
 ```
 
 The rule throughout: a folder is created when the first file that belongs

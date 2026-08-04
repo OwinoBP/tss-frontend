@@ -1,25 +1,23 @@
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * Loading placeholder matching ProductCard's exact shape and spacing, so
- * the loading -> loaded transition doesn't reflow. Per
- * docs/design-system.md's "Motion principles": skeleton shapes (not a
- * spinner) using the Muted Fill token, and `motion-safe:` only, so the
- * pulse respects `prefers-reduced-motion` automatically. Purely
- * decorative — `aria-hidden`; the loading region's accessible
- * announcement lives on `ProductGridSkeleton`'s wrapper.
+ * the loading -> loaded transition doesn't reflow. Purely decorative —
+ * the loading region's accessible announcement lives on
+ * `ProductGridSkeleton`'s wrapper, not here.
  */
 export function ProductCardSkeleton() {
   return (
-    <Card aria-hidden="true" className="gap-4 overflow-hidden py-0">
-      <div className="aspect-square w-full bg-muted motion-safe:animate-pulse" />
+    <Card className="gap-4 overflow-hidden py-0">
+      <Skeleton className="aspect-square w-full rounded-none" />
       <CardContent className="flex flex-col pb-4">
         <div className="flex flex-col gap-1">
-          <div className="h-5 w-3/4 rounded bg-muted motion-safe:animate-pulse" />
-          <div className="h-4 w-1/2 rounded bg-muted motion-safe:animate-pulse" />
-          <div className="h-3 w-1/3 rounded bg-muted motion-safe:animate-pulse" />
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-3 w-1/3" />
         </div>
-        <div className="mt-3 h-4 w-1/4 rounded bg-muted motion-safe:animate-pulse" />
+        <Skeleton className="mt-3 h-4 w-1/4" />
       </CardContent>
     </Card>
   );

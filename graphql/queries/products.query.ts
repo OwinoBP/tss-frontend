@@ -1,5 +1,5 @@
 import { gql, type TypedDocumentNode } from "@apollo/client";
-import { PRODUCT_CARD_FRAGMENT } from "@/graphql/fragments/product-card.fragment";
+import { PRODUCT_FIELDS_FRAGMENT } from "@/graphql/fragments/product.fragment";
 import type { WooCommerceProductDto } from "@/types/dto/woocommerce-product.dto";
 
 export interface ProductsQueryPageInfo {
@@ -43,7 +43,7 @@ export const PRODUCTS_QUERY: TypedDocumentNode<
     products(first: $first, after: $after) {
       nodes {
         ... on SimpleProduct {
-          ...ProductCardFields
+          ...ProductFields
         }
       }
       pageInfo {
@@ -52,5 +52,5 @@ export const PRODUCTS_QUERY: TypedDocumentNode<
       }
     }
   }
-  ${PRODUCT_CARD_FRAGMENT}
+  ${PRODUCT_FIELDS_FRAGMENT}
 `;

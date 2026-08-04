@@ -1,6 +1,8 @@
-import type { Money, MusicProduct, ProductType } from "@/types/music-product";
+import type { MusicProduct } from "@/types/music-product";
 import type { ProductCardProps } from "./ProductCard.types";
-import { routes, storeConfig } from "@/lib/config";
+import { routes } from "@/lib/config";
+import { formatMoney } from "@/lib/format-money";
+import { PRODUCT_TYPE_LABELS } from "@/data/product-types";
 
 // Product card mapper
 //
@@ -16,22 +18,6 @@ import { routes, storeConfig } from "@/lib/config";
 // isn't a data-fetching concern (no WooCommerce/GraphQL knowledge here),
 // it's presentation shaping for one specific component. See
 // docs/component-principles.md, "Colocate what's private."
-
-/**
- * Singular display labels for `ProductType` (types/music-product.ts) — a
- * per-item label ("Sample Pack"), not the plural category-browsing label
- * used elsewhere (e.g. "Sample Packs" in components/marketing/ShopByType).
- * Those are different content for different contexts, not the same value
- * duplicated — kept separate rather than sharing one map and pluralizing.
- */
-const PRODUCT_TYPE_LABELS: Record<ProductType, string> = {
-  "sample-pack": "Sample Pack",
-  "drum-kit": "Drum Kit",
-  "midi-pack": "MIDI Pack",
-  preset: "Preset",
-  "one-shot": "One-Shot",
-  "construction-kit": "Construction Kit",
-};
 
 export function toProductCard(product: MusicProduct): ProductCardProps {
   return {
@@ -49,15 +35,8 @@ export function toProductCard(product: MusicProduct): ProductCardProps {
         }
       : null,
     price: {
-      regular: formatMoney(product.regularPrice),
-      sale: product.salePrice ? formatMoney(product.salePrice) : null,
+      regularPrice: formatMoney(product.regularPrice),
+      salePrice: product.salePrice ? formatMoney(product.salePrice) : null,
     },
   };
-}
-
-function formatMoney(money: Money): string {
-  return new Intl.NumberFormat(storeConfig.locale.default, {
-    style: "currency",
-    currency: money.currency,
-  }).format(money.amount);
 }

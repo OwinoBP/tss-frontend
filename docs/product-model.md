@@ -265,6 +265,36 @@ changed without the client's input.
   `product.mapper.ts` and [docs/api/product-query.md](api/product-query.md),
   not a bug — there's still no WooCommerce source for either field.
 
+## Validated by feature/product-detail: the model didn't need to change
+
+`feature/product-detail` was scoped partly as a validation pass for this
+model — building the first *rich* product view (as opposed to
+`ProductCard`'s summary) is exactly the kind of work that would expose a
+missing field. It didn't: **no field was added to `MusicProduct`.**
+
+- **`description` and `gallery`** were already present, already fetched
+  by the mapper, and already correctly typed — they simply had no
+  presentation-layer consumer until `ProductInfo`/`ProductGallery`. That
+  they slotted in with zero model changes is a good sign the original
+  model wasn't under-scoped for a detail view, just ahead of the UI that
+  would exercise it.
+- **`categories`, `tags`, `producer`, `productType`** all rendered
+  correctly with existing fields and existing (documented) placeholder
+  behavior — see "Fields worth revisiting" above. The detail page doesn't
+  hide or work around the `productType`/`producer` placeholders; it
+  displays them exactly as `ProductCard` already does, since that's the
+  honest current state of the data.
+- **`bpm`, `musicalKey`, `fileFormat`, `duration`, `previewUrl`** were
+  deliberately *not* given any UI in this pass, and the model was not
+  touched to make room for them either. All five remain `null`/`[]` for
+  every product (no WooCommerce/WPGraphQL source exists for any of them —
+  see "Fields that will likely be custom metadata" above); building
+  display UI for fields that can never currently hold data, or widening
+  the model preemptively, would be exactly the kind of speculative work
+  this document's own stated approach avoids. Add the field, the query
+  selection, and the UI together, once one of these has a real backend
+  source — not before.
+
 ## See also
 
 - [design-system.md](design-system.md#product-card-anatomy) — how these

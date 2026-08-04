@@ -7,21 +7,7 @@
  * directly.
  */
 
-export interface ProductCardArtwork {
-  url: string;
-  /**
-   * Always meaningful, never empty — product-card.mapper.ts guarantees a
-   * fallback even when the source `MusicProduct.artwork.alt` is `""`.
-   */
-  alt: string;
-}
-
-export interface ProductCardPrice {
-  /** Formatted for display in the store's locale/currency (e.g. "$29.99"). */
-  regular: string;
-  /** Formatted the same way as `regular`; present only when on sale. */
-  sale: string | null;
-}
+import type { ProductImageSource } from "@/components/commerce/ProductImage";
 
 export interface ProductCardProps {
   /** Product detail route — built from `routes.products.detailPath`, never hardcoded. */
@@ -31,7 +17,11 @@ export interface ProductCardProps {
   producer: string;
   /** Display label for `MusicProduct.productType` (e.g. "Sample Pack"), not the raw slug. */
   productType: string;
-  /** `null` when the product has no image — ProductCard renders a placeholder fill, never a fake image. */
-  artwork: ProductCardArtwork | null;
-  price: ProductCardPrice;
+  /** `null` when the product has no image — ProductCard renders a placeholder fill, never a fake image (see ProductImage). */
+  artwork: ProductImageSource | null;
+  /** Already formatted for display — see ProductPricing, which renders this. */
+  price: {
+    regularPrice: string;
+    salePrice: string | null;
+  };
 }

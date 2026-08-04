@@ -3,6 +3,7 @@ import {
   PRODUCTS_QUERY,
   type ProductsQueryPageInfo,
 } from "@/graphql/queries/products.query";
+import { PRODUCT_QUERY } from "@/graphql/queries/product.query";
 import { mapWooCommerceProductToMusicProduct } from "@/services/mappers/product.mapper";
 import { storeConfig } from "@/lib/config";
 import type { MusicProduct } from "@/types/music-product";
@@ -16,9 +17,9 @@ import type { MusicProduct } from "@/types/music-product";
 //
 //   React Components -> Services -> Apollo Client -> GraphQL -> WordPress
 //
-// getProducts/getProductsPage are implemented below. The rest wait on
-// queries this pass doesn't build (a single-product query, a search
-// query) — see docs/api/product-query.md.
+// getProducts/getProductsPage/getProduct are implemented below. The rest
+// wait on queries this pass doesn't build (a search query) — see
+// docs/api/product-query.md.
 
 export interface GetProductsParams {
   first?: number;
@@ -78,6 +79,48 @@ export async function getProducts(
 
 // export async function getFeaturedProducts(): Promise<MusicProduct[]> { ... }
 
-// export async function getProduct(slug: string): Promise<MusicProduct> { ... }
+/**
+ * Fetches a single product by slug, or `null` if none exists.
+ *
+ * Uses `errorPolicy: "all"`, deliberately different from
+ * `getProductsPage`'s `"none"` — confirmed live against the real
+ * WPGraphQL endpoint (see graphql/queries/product.query.ts): querying a
+ * nonexistent slug returns `data.product: null` *alongside* a top-level
+ * GraphQL error ("No product ID was found corresponding to the slug:
+ * ..."), not a clean null with no errors. With `errorPolicy: "none"`
+ * (which rejects on any GraphQL error), that would surface a legitimate
+ * 404 as a thrown fetch failure — indistinguishable from a real backend
+ * fault, and routed to the wrong UI.
+ *
+ * The distinguishing signal, confirmed empirically (not assumed) by
+ * logging both cases against this project's real backend: `data` is
+ * *present* — `{ product: null }` — for a coherent "not found" response,
+ * but *entirely absent* (`undefined`) when the request fails outright
+ * (network failure, unreachable host). `errorPolicy: "all"` does not
+ * throw for either case (a subtlety worth being explicit about — it does
+ * not only suppress GraphQL-level errors, unlike what the Apollo docs'
+ * phrasing might suggest), so this function checks `data` itself, not
+ * just `data.product`, to tell "not found" (a valid application state —
+ * the caller should call `notFound()`) apart from "something actually
+ * broke" (re-thrown here so it propagates to `error.tsx`, matching
+ * `getProductsPage`'s behavior for a real fault). See docs/decisions.md.
+ */
+export async function getProduct(slug: string): Promise<MusicProduct | null> {
+  const { data, error } = await query({
+    query: PRODUCT_QUERY,
+    variables: { slug },
+    errorPolicy: "all",
+  });
+
+  if (!data) {
+    throw error ?? new Error(`Failed to fetch product "${slug}"`);
+  }
+
+  if (!data.product || data.product.__typename !== "SimpleProduct") {
+    return null;
+  }
+
+  return mapWooCommerceProductToMusicProduct(data.product);
+}
 
 // export async function searchProducts(term: string): Promise<MusicProduct[]> { ... }
