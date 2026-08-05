@@ -2,6 +2,7 @@ import { query } from "@/lib/apollo/rsc-client";
 import {
   PRODUCTS_QUERY,
   type ProductsQueryPageInfo,
+  type ProductsQueryWhere,
 } from "@/graphql/queries/products.query";
 import { PRODUCT_QUERY } from "@/graphql/queries/product.query";
 import { mapWooCommerceProductToMusicProduct } from "@/services/mappers/product.mapper";
@@ -17,13 +18,19 @@ import type { MusicProduct } from "@/types/music-product";
 //
 //   React Components -> Services -> Apollo Client -> GraphQL -> WordPress
 //
-// getProducts/getProductsPage/getProduct are implemented below. The rest
-// wait on queries this pass doesn't build (a search query) — see
-// docs/api/product-query.md.
+// getProducts/getProductsPage/getProduct are implemented below.
 
 export interface GetProductsParams {
   first?: number;
   after?: string | null;
+  /**
+   * Passed straight through to PRODUCTS_QUERY's `where` variable — see
+   * ProductsQueryWhere. feature/product-search is the first caller
+   * (`{ search }`); a future category/brand listing page extends the same
+   * object rather than this function growing a new flat parameter per
+   * filter.
+   */
+  where?: ProductsQueryWhere;
 }
 
 export interface ProductsPage {
@@ -53,6 +60,7 @@ export async function getProductsPage(
     variables: {
       first: params.first ?? storeConfig.catalog.productsPerPage,
       after: params.after ?? null,
+      where: params.where,
     },
     errorPolicy: "none",
   });
@@ -122,5 +130,3 @@ export async function getProduct(slug: string): Promise<MusicProduct | null> {
 
   return mapWooCommerceProductToMusicProduct(data.product);
 }
-
-// export async function searchProducts(term: string): Promise<MusicProduct[]> { ... }

@@ -25,22 +25,36 @@ export interface ProductsQueryData {
 }
 
 /**
+ * Mirrors (a subset of) WPGraphQL's own `RootQueryToProductConnectionWhereArgs`
+ * — confirmed via live introspection to exist on the `products` root field,
+ * not guessed. Only `search` is wired through today (feature/product-search);
+ * the type is named after the real GraphQL arg rather than flattened into a
+ * standalone `search?: string` query variable so a future category/brand
+ * listing page can add `category`/`productBrand` here additively instead of
+ * `PRODUCTS_QUERY` growing a new top-level variable per filter.
+ */
+export interface ProductsQueryWhere {
+  search?: string;
+}
+
+/**
  * `first`/`after` are cursor pagination (WPGraphQL's Relay-style
- * connection args). Both optional and unused by the service today —
- * wired through now so pagination doesn't require touching the query
- * shape later, only the service call site.
+ * connection args). `where` is optional and `undefined` for every caller
+ * that doesn't filter (e.g. the plain product catalog) — WPGraphQL treats
+ * an omitted `where` identically to no filtering at all, confirmed live.
  */
 export interface ProductsQueryVariables {
   first?: number;
   after?: string | null;
+  where?: ProductsQueryWhere;
 }
 
 export const PRODUCTS_QUERY: TypedDocumentNode<
   ProductsQueryData,
   ProductsQueryVariables
 > = gql`
-  query Products($first: Int, $after: String) {
-    products(first: $first, after: $after) {
+  query Products($first: Int, $after: String, $where: RootQueryToProductConnectionWhereArgs) {
+    products(first: $first, after: $after, where: $where) {
       nodes {
         ... on SimpleProduct {
           ...ProductFields

@@ -1071,3 +1071,169 @@ after, and the store was confirmed back to its original state (zero
 products, only the pre-existing default WooCommerce placeholder
 attachment) — the same "leave it exactly as found" discipline the
 original product-query branch established.
+
+## Product Search: a second Listing page, no new query, one generalized parameter
+
+`feature/product-search` adds `app/search` — deliberately scoped as a
+validation pass for the Listing page pattern (docs/architecture.md, "Page
+architecture patterns") as much as a feature: does `app/products`'s
+service -> presentation mapper -> `ProductGrid` pipeline actually
+generalize to a second entry point, or does search need its own shape? It
+generalizes. `app/search` is the same pipeline as `app/products` with one
+new input (a search term) and one metadata difference (always `noindex`);
+nothing about `ProductGrid`, `ProductCard`, the presentation mapper, the
+DTO, or `product.mapper.ts` changed at all.
+
+### No new GraphQL query — confirmed via live introspection, not assumed
+
+The natural question was whether `products`/`PRODUCTS_QUERY` could
+express "search" at all, or whether search needed its own root
+field/query (WPGraphQL sometimes exposes a separate `search` fallback
+depending on plugin version). Per this project's standing practice
+(see "Schema investigation" above), introspection was temporarily
+re-enabled (`wp eval 'update_option("graphql_general_settings",
+array("public_introspection_enabled" => "on"));'`) to check directly
+rather than guess from WooCommerce/WPGraphQL documentation, then
+reverted via `delete_option` immediately after, restoring the exact prior
+(introspection-off) state.
+
+**Confirmed: `products`'s existing `where` argument
+(`RootQueryToProductConnectionWhereArgs`) already includes `search:
+String`**, alongside `category`, `productBrand`, `minPrice`/`maxPrice`,
+and others not used by this branch. A live test query
+(`products(first: 12, where: { search: "lofi" })`) against the real
+backend returned a clean `{ nodes: [], pageInfo: {...} }` with no error —
+confirming the argument works, not just that it exists in the schema.
+`PRODUCTS_QUERY` (`graphql/queries/products.query.ts`) gained one new
+optional variable, `$where: RootQueryToProductConnectionWhereArgs`,
+threaded through to `products(..., where: $where)`. Every existing
+caller (the catalog page) is unaffected — `where` is `undefined` for
+them, identical to the query WPGraphQL received before this branch.
+
+### `GetProductsParams.where`, not a `searchProducts()` function
+
+`services/product.service.ts` had a stub comment anticipating a
+dedicated `searchProducts(term)` function. That path was rejected in
+favor of generalizing `GetProductsParams` itself:
+
+```ts
+export interface GetProductsParams {
+  first?: number;
+  after?: string | null;
+  where?: ProductsQueryWhere; // currently { search?: string }
+}
+```
+
+`getProductsPage` passes `params.where` straight through to
+`PRODUCTS_QUERY`. `app/search/page.tsx` calls the exact same function
+`app/products/page.tsx` calls, just with `where: { search: query }`
+added. The deciding factor: `ProductsQueryWhere` is named and shaped
+after WPGraphQL's own `where` argument, not invented — so a future
+category or brand listing page extends the *same* object
+(`where.category`, `where.productBrand`) instead of `getProductsPage`
+accumulating a new flat parameter (`search?`, `category?`, `brand?`...)
+per feature, which is exactly the "painted into a corner" failure mode
+a one-off `searchProducts` function risked normalizing. Only `search` is
+wired up now — `category`/`productBrand`/the rest of
+`RootQueryToProductConnectionWhereArgs` are real, confirmed-available
+fields (seen during the same introspection pass) deliberately left out
+of `ProductsQueryWhere` until a page actually needs them; adding one is a
+one-line addition to that interface, not a rework of the parameter shape.
+
+### Metadata: `noindex` on every state, not just non-canonical pagination
+
+`app/products` indexes its own page one (a real, stable, crawlable
+catalog entry point) and only `noindex`es `?after=...` pages, since those
+have no stable per-page URL. `app/search` takes a stricter default:
+**every** state — no query, a real result set, zero results, page 2+ —
+sets `robots: { index: false, follow: true }`, including what would be
+"page one" of a query. Internal site-search result pages are
+conventionally excluded from indexing (thin/near-duplicate content
+relative to the real catalog pages that already carry the indexable
+version of the same products); letting Google index `/search?q=...`
+would mean an ever-growing set of thin pages competing with `/products`
+and `/products/[slug]` for the same queries, for zero benefit — a
+crawler that wants these products already reaches them by following
+`/products`'s own links. This was confirmed as the intended behavior
+before implementation, not defaulted to without considering the
+alternative (indexing search results the way `/products` indexes its own
+page one).
+
+### Empty state: two different messages, one still not an error
+
+Zero results is a valid business state either way (matching the Listing
+page pattern's existing "empty isn't an error" rule), but `app/search`
+has two distinct zero-result cases the catalog doesn't: no query
+submitted yet, and a query that matched nothing. Both are plain
+conditionals in `page.tsx`, neither routed through `error.tsx` — the
+service function (`getProductsPage`) isn't even called for the first
+case (a blank/whitespace `q` is trimmed and checked before any fetch),
+so "no query yet" costs no network round trip.
+
+### The search form needs no client-side JavaScript
+
+`app/search/SearchForm.tsx` is a plain `<form method="GET"
+action="/search">` with one `name="q"` input — submitting it is an
+ordinary browser navigation to `/search?q=...`, not a client-side fetch.
+This keeps `app/search/page.tsx` a genuine `async` Server Component with
+zero client JavaScript for the search interaction itself, consistent
+with "prefer Server Components." `SearchForm` is colocated in
+`app/search/` rather than promoted to `components/common/`: it has
+exactly two consumers, both inside this same route segment
+(`page.tsx`, which needs the submitted query prefilled via
+`defaultQuery`, and `loading.tsx`, which renders it without one so the
+form doesn't appear/disappear between the loading and loaded states —
+extending this project's existing "loading state must share the real
+component's layout" rule, previously applied only to
+`ProductGridSkeleton`, to the form as well) — per
+docs/component-principles.md's "colocate what's private" rule, that
+doesn't yet earn a shared-folder location.
+
+### Deliberately out of scope: no Header/Navigation entry point
+
+This branch adds only `/search` itself, reachable by direct URL —
+consistent with how `app/products` was reachable (linked from `Hero`)
+before `Navigation` itself carried a products link, and with this
+project's standing preference for small, single-responsibility branches.
+`routes.searchPath` already existed in `lib/config/routes.ts` before this
+branch (unused, same as `routes.cart`/`routes.account` today) and needed
+no change. Wiring a search icon/input into `Header`/`Navigation` as a
+real, sitewide entry point is deferred to whichever branch next touches
+navigation, per the same reasoning `decisions.md`'s "Navigation scope"
+entry already applied to cart/account/search links.
+
+### Verified against the live backend, including a real result set and real pagination
+
+The store had zero real products going in (consistent with every prior
+branch's ADRs). Four temporary products were created via `wp wc product
+create` — "Lofi Dreams Sample Pack" plus three "Lofi Vibes Vol
+{1,2,3}" — to verify the has-results path (`/search?q=lofi` and
+`/search?q=Dreams`, confirming a case-insensitive partial-word match,
+both rendering real `ProductCard`s through the unmodified
+`toProductCard` mapper and `ProductGrid`), the true no-results path
+(`/search?q=zzzznotfound`), and pagination: a direct GraphQL query with
+`first: 2, where: { search: "lofi" }` confirmed `pageInfo.hasNextPage:
+true` with a real `endCursor`, then `/search?q=lofi&after=<that
+cursor>` was requested through the actual Next.js route and confirmed to
+return the remaining two products — end-to-end through the real
+`?after=` mechanism, not just the underlying GraphQL call. All four
+products were deleted immediately after
+(`wp post delete --force`), and `/search?q=lofi` was re-requested
+afterward, confirming it returned to the real "no products found" state
+— the store left exactly as found.
+
+The error boundary was verified the same way as `feature/product-catalog`'s
+(a second `npm run dev` instance with `NEXT_PUBLIC_GRAPHQL_ENDPOINT`
+overridden to an unreachable host), with one addition: `curl` alone
+couldn't confirm `error.tsx`'s actual rendered output, because Next's
+error boundary is a Client Component that only renders after browser-side
+hydration — a raw HTML/RSC-payload fetch shows the error's `digest` but
+not `SearchError`'s own JSX. This turned out to be true for
+`app/products/error.tsx` as well when spot-checked the same way,
+meaning `curl`-only verification was never actually sufficient evidence
+for either error boundary, only for the digest-forwarding mechanism
+underneath it. Confirmed instead with a headless Chromium render
+(`chromium --headless --dump-dom`), which showed the real rendered
+copy ("We couldn't load search results right now") and the "Try again"
+button — both loading, empty, no-results, and results states were also
+screenshotted the same way for visual confirmation.

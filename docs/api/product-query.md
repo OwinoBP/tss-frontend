@@ -26,7 +26,8 @@ Service (services/product.service.ts — getProductsPage/getProducts, getProduct
    │  runs the query, filters non-SimpleProduct nodes, maps, returns
    │  MusicProduct[] (list) or MusicProduct | null (single)
    ▼
-Server Component (app/products/page.tsx, app/products/[slug]/page.tsx)
+Server Component (app/products/page.tsx, app/products/[slug]/page.tsx,
+                  app/search/page.tsx)
    │  calls the service, renders — has no GraphQL/Apollo knowledge at all
 ```
 
@@ -38,16 +39,48 @@ corresponding benefit (the fragment already selects everything
 name).
 
 Verified live, end to end, against this project's actual WPGraphQL
-endpoint, twice: once for the listing query (a temporary WooCommerce
+endpoint, three times: once for the listing query (a temporary WooCommerce
 product created via `wp wc product create` — category, tag, featured
 image, regular and sale price — fetched, confirmed correctly mapped,
-then deleted), and again for the single-product query in
+then deleted); again for the single-product query in
 `feature/product-detail` (a second temporary product, this time with a
 real image gallery and an HTML-formatted description, confirmed via a
 direct `curl` against the GraphQL endpoint and then through the real
-`/products/[slug]` route, then deleted). The store has no real products
+`/products/[slug]` route, then deleted); and again for the listing
+query's `where` argument in `feature/product-search` (four temporary
+products, confirming a real match, a real no-match, and real
+`where`+pagination combined via `app/search`, then deleted — see
+docs/decisions.md, "Product Search"). The store has no real products
 outside these temporary, cleaned-up tests. See "WooCommerce limitations
 discovered" below for what each surfaced.
+
+## Filtering the listing query (`where`)
+
+`PRODUCTS_QUERY` accepts an optional `$where:
+RootQueryToProductConnectionWhereArgs` variable, passed to
+`products(first: $first, after: $after, where: $where)`. Confirmed via
+live introspection (`feature/product-search`) that this argument already
+exists on the `products` root field and includes `search: String` among
+many other filters (`category`, `productBrand`, `minPrice`/`maxPrice`,
+`featured`, `onSale`, etc.) — not requested here, added only if/when a
+page actually needs one. `graphql/queries/products.query.ts` types the
+subset actually used as `ProductsQueryWhere`, currently just `{ search?:
+string }`.
+
+`services/product.service.ts`'s `GetProductsParams.where` passes straight
+through to this variable — `app/products/page.tsx` never sets it
+(`where: undefined`, identical to the query before this argument
+existed), `app/search/page.tsx` sets `where: { search: query }`. A blank
+query is *not* sent as `where: { search: "" }` — `app/search/page.tsx`
+trims and checks it before calling the service at all, so "no query
+submitted" never reaches WPGraphQL.
+
+**Confirmed live: an empty `search` match returns a clean `{ nodes: [],
+pageInfo: { hasNextPage: false, endCursor: null } }`**, no error — same
+"empty is a valid state, not a failure" shape the rest of this query
+already returns for an empty catalog. `where.search` and `first`/`after`
+compose normally together (confirmed with a real multi-product match set
+and a real second page fetched through the actual cursor).
 
 ## Fields currently retrieved, and why
 

@@ -132,6 +132,15 @@ array. Pages consume `pageInfo` to render "next page" navigation; a
 ever want the flat list. See docs/decisions.md, "Product Catalog" for the
 full reasoning.
 
+`GetProductsParams.where` (added in `feature/product-search`) is the first
+filtering hook on top of that: an object mirroring WPGraphQL's own
+`RootQueryToProductConnectionWhereArgs` shape (`{ search }` today), passed
+straight through to `PRODUCTS_QUERY`'s `where` variable. Shaped as an
+object rather than a flat `search` parameter specifically so a future
+category or brand listing page can add `where.category`/`where.productBrand`
+additively, instead of `getProductsPage` growing a new flat parameter per
+future filter. See docs/decisions.md, "Product Search."
+
 ## Page architecture patterns
 
 Two page shapes are established, and future pages should extend one of
@@ -143,7 +152,10 @@ differ in what "nothing to show" means and how pagination applies.
 
 ### Listing pages
 
-Example: `app/products` (`feature/product-catalog`).
+Examples: `app/products` (`feature/product-catalog`), `app/search`
+(`feature/product-search` — the same pattern with a `where.search` filter
+and a query-param-driven form instead of an implicit "everything" fetch;
+see docs/decisions.md, "Product Search" for what, if anything, differs).
 
 ```
 service (getXPage: { items, pageInfo }) -> items.map(toXCard) -> XGrid -> page
@@ -164,7 +176,10 @@ service (getXPage: { items, pageInfo }) -> items.map(toXCard) -> XGrid -> page
   caught in the page component, reaches this Next.js error boundary.
 - **Metadata** — `generateMetadata` sets `noindex`/canonical-back-to-page-one
   for any non-first page, since cursor pagination has no stable per-page
-  URL worth indexing separately.
+  URL worth indexing separately. `app/search` goes further and sets
+  `noindex` on *every* state, first page included — see docs/decisions.md,
+  "Product Search" for why a search listing's "page one" isn't the same
+  case as the catalog's.
 
 ### Detail pages
 
