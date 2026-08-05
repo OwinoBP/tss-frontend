@@ -1441,12 +1441,148 @@ can't set an arbitrary status code from `page.tsx` outside Next's own
 and a clear recovery link — a known, deliberate soft-404, not an
 oversight.
 
-**`app/products/[slug]` was deliberately left unchanged.** Fixing an
-already-merged branch's defect is out of this branch's scope (see
-`feature/*`'s standing "small, single-responsibility branches" discipline
-in the project handover doc) — flagged here in detail specifically so a
-dedicated follow-up branch can apply the same fix (or a better one, if a
-future Next.js version resolves the underlying defect) without
-re-discovering it from scratch. Filing/tracking this against Next.js
-itself is also worth doing, but is outside what a WooCommerce-integration
-frontend branch owns.
+**`app/products/[slug]` was deliberately left unchanged** by this branch
+— fixing an already-merged branch's defect was out of `feature/category-pages`'s
+own scope (see `feature/*`'s standing "small, single-responsibility
+branches" discipline in the project handover doc), flagged here in detail
+specifically so a dedicated follow-up branch could apply the same fix
+without re-discovering it from scratch. That follow-up is
+`feature/detail-pattern-hardening` — see "Detail Page Pattern Hardening"
+below, which also promotes the pattern established here (inline
+`CategoryNotFound`) to the project's one canonical Detail page convention,
+replacing the page-local `CategoryNotFound` with a shared
+`components/common/DetailNotFound`.
+
+## Detail Page Pattern Hardening: one canonical Detail page convention, and re-confirming the framework defect
+
+`feature/detail-pattern-hardening` (based on `feature/category-pages`)
+exists solely to resolve the one inconsistency `feature/category-pages`
+knowingly left behind: `app/products/[slug]` still used
+`notFound()`/`not-found.tsx`, the exact mechanism confirmed above to
+swallow unrelated errors into the wrong boundary. This branch introduces
+no new storefront features — it standardizes both existing Detail pages
+(`app/products/[slug]`, `app/categories/[slug]`) on one pattern.
+
+### Re-confirmed live, not assumed carried over from the prior branch
+
+Before changing any code, the exact defect described above was
+re-reproduced against the currently-installed `next@16.2.12` — same
+method (a second server instance, `NEXT_PUBLIC_GRAPHQL_ENDPOINT`
+overridden to an unreachable host), same result: `app/products/[slug]`
+(still using `notFound()`/`not-found.tsx` at that point) rendered
+"Product not found" for a genuine backend outage, while `app/categories/[slug]`
+(already fixed) correctly showed only the error `digest`. This confirms
+the defect wasn't a one-off artifact of the environment or the prior
+session, before spending effort standardizing around it.
+
+**A related, currently-open upstream issue was also found**
+([vercel/next.js#93253](https://github.com/vercel/next.js/issues/93253),
+filed 2026-05-08, still reproducing as of `16.3.0-canary.2`): a route
+segment's `not-found.tsx` is auto-wrapped in an internal
+`HTTPAccessFallbackBoundary`, and that boundary swallows the HTTP 404
+status code (not just the rendered UI) when a `loading.tsx` sibling
+triggers streaming — a narrower but clearly related symptom of the same
+internal component. This corroborates that the defect this project found
+is a real, currently-unresolved area of `HTTPAccessFallbackBoundary`
+instability, not something specific to this codebase. The one seemingly
+relevant *merged* fix in the same area,
+[vercel/next.js#94037](https://github.com/vercel/next.js/pull/94037)
+("Improve notFound recovery in error pathway"), is scoped specifically to
+`cacheComponents` (an experimental flag this project's `next.config.ts`
+does not enable), so it would not resolve this project's case even on the
+newer `16.3.0` stable release (released 2026-08-03, checked via `npm view
+next versions`, not upgraded to).
+
+**The upstream issue's own suggested workaround — removing `loading.tsx`
+— was tested against this project's defect specifically, and does not
+fix it.** `app/products/[slug]/loading.tsx` was temporarily removed and
+the unreachable-backend test re-run: "Product not found" still rendered.
+This confirms this project's defect and the upstream issue, while both
+implicating `HTTPAccessFallbackBoundary`, are not the identical bug —
+this project's is broader (any uncaught error, independent of
+`loading.tsx`/streaming), so the upstream issue's workaround doesn't
+transfer. No official, non-experimental fix exists for what this project
+hit; the inline-conditional mitigation already proven for
+`app/categories/[slug]` is the only grounded option, not a speculative
+one reached for without checking alternatives first.
+
+### One canonical pattern: `DetailNotFound` + `DETAIL_NOT_FOUND_METADATA`
+
+`components/common/DetailNotFound/` (`DetailNotFound.tsx`,
+`detail-not-found-metadata.ts`, `index.ts`) replaces both
+`app/products/[slug]`'s prior `notFound()`/`not-found.tsx` and
+`app/categories/[slug]`'s prior page-local `CategoryNotFound` function
+with one shared piece:
+
+- **`DetailNotFound`** is deliberately fully generic and
+  presentation-only — `title`/`message`/`actionLabel`/`actionHref` props,
+  no knowledge of `MusicProduct`, `Category`, a slug, a resource type,
+  GraphQL, or services. Each Detail page supplies its own copy, so the
+  shared component can never accumulate resource-specific branching (the
+  exact failure mode "avoid page-specific implementations" was meant to
+  prevent).
+- **`DETAIL_NOT_FOUND_METADATA`** (`{ robots: { index: false, follow: true
+  } }`) is the metadata every Detail page's `generateMetadata` returns
+  from its own null-resource branch, alongside a page-specific `title`
+  (`generateMetadata` isn't itself generic — each page still knows its
+  own resource's name). Named specifically, not a generic
+  `NOT_FOUND_METADATA`, so it stays unambiguous as the app grows other
+  "not found"-shaped states — a Listing page's zero-results state, for
+  instance, is a different, valid, indexable state that must never
+  import this constant.
+- Colocated in one folder (`components/common/DetailNotFound/`) rather
+  than split across `components/` and `lib/`, since a Detail page always
+  needs both together — importing one without the other is very likely a
+  mistake, and one barrel export (`index.ts`) makes that pairing obvious
+  at the call site.
+
+`app/products/[slug]/not-found.tsx` was deleted (no longer referenced).
+`app/categories/[slug]`'s local `CategoryNotFound` function was deleted
+in favor of the shared component — no behavior change for that page,
+purely a consolidation.
+
+**`loading.tsx` and `error.tsx` were not touched on either page.** They
+were already consistent in shape (same `Suspense` convention, same
+Client Component `error.tsx` with `unstable_retry`) before this branch —
+the inconsistency was entirely in not-found handling, so that's the only
+thing this branch changes, per its own "architectural consolidation
+only" scope.
+
+### An unrelated, genuine bug found during this branch's own verification pass, and fixed
+
+Live-testing `app/categories/[slug]`'s "found" state against a
+**top-level** category (no parent) — something `feature/category-pages`'s
+own verification never did; every temporary category created there had a
+real parent, specifically to test breadcrumb ancestry — surfaced a
+crash: `category.mapper.ts` called `dto.ancestors.nodes.map(...)`
+unconditionally, but confirmed live that WPGraphQL returns `ancestors:
+null` (not a clean `{ nodes: [] }`) for a category with no ancestors.
+Every top-level category page would have thrown on this line in
+production. Fixed with a one-line defensive check
+(`dto.ancestors ? dto.ancestors.nodes.map(mapTermRef).reverse() : []`),
+and `WooCommerceCategoryDto.ancestors`'s type corrected to
+`{ nodes: [...] } | null`, matching the schema as confirmed rather than
+as originally assumed. Re-verified against both a top-level category (no
+crash, empty breadcrumb ancestry beyond Home -> Categories) and a nested
+one (breadcrumb ordering still correct) before and after the fix. Kept
+in this branch rather than deferred: it's a one-line correction to a
+type/null-check already owned by `feature/category-pages`'s own new
+code, found during required live verification, not a new feature or a
+redesign.
+
+### Verified against the live backend, same rigor as the original discovery
+
+A temporary top-level category, a temporary nested category, and a
+temporary product (`wp wc product_cat create`, `wp wc product create`)
+were used to verify, for **both** `app/products/[slug]` and
+`app/categories/[slug]`: the found state (real content, correct
+`<title>`), the not-found state (`DetailNotFound`'s copy, HTTP `200`,
+`noindex, follow`), and — the actual point of this branch — the error
+state under a genuinely unreachable backend, confirmed via both a raw
+`curl` (only the error `digest` present, no `DetailNotFound` copy — the
+regression this branch exists to prevent) and a headless Chromium render
+with `--virtual-time-budget=15000` (the real, hydrated `error.tsx` copy —
+"Try again" — confirmed present for both pages). All temporary data was
+deleted immediately after and the store re-queried to confirm it returned
+to its exact prior state (only WooCommerce's default `"uncategorized"`
+category, zero products).

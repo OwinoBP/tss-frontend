@@ -21,9 +21,13 @@ export interface WooCommerceCategoryDto {
   /**
    * Confirmed live: ordered immediate-parent-first (nearest ancestor at
    * index 0, root last) — the mapper reverses this to root-first for
-   * breadcrumb rendering.
+   * breadcrumb rendering. `null` (not `{ nodes: [] }`) for a top-level
+   * category with no parent — confirmed live during
+   * `feature/detail-pattern-hardening`'s verification pass (a case
+   * `feature/category-pages` never tested against, since every temporary
+   * category created there had a real parent).
    */
-  ancestors: { nodes: WooCommerceCategoryTermRefDto[] };
+  ancestors: { nodes: WooCommerceCategoryTermRefDto[] } | null;
 }
 
 /** The minimal shape `parent`/`ancestors` nodes carry — enough for a breadcrumb link, not a full category fetch. */

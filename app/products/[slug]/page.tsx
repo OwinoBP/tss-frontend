@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
 import { getProduct } from "@/services/product.service";
 import { ProductGallery, toProductGallery } from "@/components/commerce/ProductGallery";
 import { ProductInfo, toProductInfo } from "@/components/commerce/ProductInfo";
 import { Breadcrumbs } from "@/components/common/Breadcrumbs";
+import { DetailNotFound, DETAIL_NOT_FOUND_METADATA } from "@/components/common/DetailNotFound";
 import { Section } from "@/components/layout/Section";
 import { routes } from "@/lib/config";
 import { stripHtml } from "@/lib/strip-html";
@@ -19,7 +19,7 @@ export async function generateMetadata({
   const product = await getProduct(slug);
 
   if (!product) {
-    return {};
+    return { title: "Product not found", ...DETAIL_NOT_FOUND_METADATA };
   }
 
   const description = stripHtml(product.description).slice(0, 160) || undefined;
@@ -36,22 +36,34 @@ export async function generateMetadata({
 }
 
 /**
- * The storefront's second real page pattern (see docs/architecture.md,
- * "Page architecture patterns"): loading.tsx (Suspense) / error.tsx
- * (thrown errors) / not-found.tsx (`notFound()`) / generateMetadata,
- * mirroring feature/product-catalog's listing pattern but for a single
- * resource instead of a collection.
+ * The storefront's canonical Detail Page Pattern (see docs/architecture.md,
+ * "Page architecture patterns" and docs/decisions.md, "Detail Page Pattern
+ * Hardening"): loading.tsx (Suspense) / error.tsx (thrown errors) / an
+ * inline `DetailNotFound` conditional / generateMetadata. Deliberately
+ * NOT `notFound()`/`not-found.tsx` — a confirmed Next.js defect causes a
+ * route segment's mere possession of a `not-found.tsx` file to swallow
+ * *any* uncaught error in that segment into the not-found boundary
+ * instead of error.tsx, not just a real `notFound()` call. Same pattern
+ * as `app/categories/[slug]`, the first page this was worked out for.
  *
  * No try/catch here, same reasoning as the catalog page: a thrown fetch
  * error propagates to error.tsx. `getProduct` returning `null` is a
- * different, valid state — handled with `notFound()`, not an error.
+ * different, valid state — handled by rendering `DetailNotFound`, not an
+ * error.
  */
 export default async function ProductDetailPage({ params }: ProductDetailPageProps) {
   const { slug } = await params;
   const product = await getProduct(slug);
 
   if (!product) {
-    notFound();
+    return (
+      <DetailNotFound
+        title="Product not found"
+        message="We couldn't find a product at this address — it may have been removed or the link may be out of date."
+        actionLabel="Browse all products"
+        actionHref={routes.products.index}
+      />
+    );
   }
 
   return (

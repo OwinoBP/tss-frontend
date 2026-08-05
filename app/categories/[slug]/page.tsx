@@ -6,6 +6,7 @@ import { getProductsPage } from "@/services/product.service";
 import { toProductCard } from "@/components/commerce/ProductCard";
 import { ProductGrid } from "@/components/commerce/ProductGrid";
 import { Breadcrumbs, type Breadcrumb } from "@/components/common/Breadcrumbs";
+import { DetailNotFound, DETAIL_NOT_FOUND_METADATA } from "@/components/common/DetailNotFound";
 import { Section } from "@/components/layout/Section";
 import { Button } from "@/components/ui/button";
 import { routes, storeConfig } from "@/lib/config";
@@ -15,36 +16,6 @@ import type { Category } from "@/types/category";
 interface CategoryPageProps {
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ after?: string }>;
-}
-
-/**
- * Rendered inline for a category slug that doesn't exist — deliberately
- * NOT `notFound()`/`not-found.tsx`, unlike app/products/[slug]. Confirmed
- * live (dev *and* production build) that this Next.js version treats the
- * mere presence of a `not-found.tsx` file in a route segment as license to
- * route *any* uncaught error in that segment — including a genuine
- * backend-unreachable failure from `getProductsPage` below, unrelated to
- * `getCategory` entirely — to the not-found boundary instead of
- * error.tsx. That's a real correctness problem (an outage would show
- * "category not found" instead of a retry affordance), so this route
- * doesn't use `not-found.tsx` at all. See docs/decisions.md, "Category
- * Pages" for how this was isolated and confirmed, including that the same
- * defect already exists in the shipped app/products/[slug].
- */
-function CategoryNotFound() {
-  return (
-    <Section heading="Category not found">
-      <div className="flex flex-col items-start gap-4">
-        <p className="text-sm text-muted-foreground">
-          We couldn&apos;t find a category at this address — it may have
-          been removed or the link may be out of date.
-        </p>
-        <Button asChild variant="outline">
-          <Link href={routes.products.index}>Browse all products</Link>
-        </Button>
-      </div>
-    </Section>
-  );
 }
 
 function categoryBreadcrumbs(category: Category): Breadcrumb[] {
@@ -76,10 +47,11 @@ export async function generateMetadata({
   const category = await getCategory(slug);
 
   if (!category) {
-    // No not-found.tsx for this route (see CategoryNotFound's doc comment) —
-    // Next won't inject noindex/404 automatically the way it does for a
-    // real notFound(), so this is set explicitly instead.
-    return { title: "Category not found", robots: { index: false, follow: true } };
+    // No not-found.tsx for this route (see docs/decisions.md, "Detail
+    // Page Pattern Hardening") — Next won't inject noindex/404
+    // automatically the way it does for a real notFound(), so this is
+    // set explicitly instead.
+    return { title: "Category not found", ...DETAIL_NOT_FOUND_METADATA };
   }
 
   // WooCommerce categories are very often left without a description —
@@ -112,16 +84,16 @@ export async function generateMetadata({
  * (empty is a valid business state, cursor pagination, same
  * service/mapper/ProductGrid pipeline as app/products and app/search) —
  * not a third page pattern. See docs/architecture.md, "Page architecture
- * patterns" and docs/decisions.md, "Category Pages".
+ * patterns" and docs/decisions.md, "Detail Page Pattern Hardening".
  *
- * Unlike app/products/[slug], "category doesn't exist" is rendered
- * inline (`CategoryNotFound`) rather than via `notFound()`/`not-found.tsx`
- * — see that component's doc comment for the confirmed Next.js behavior
- * this avoids. Every other state follows the established pattern
- * unchanged: no try/catch, so a thrown fetch error (from `getCategory` or
- * `getProductsPage`) propagates to error.tsx; zero products in a category
- * that *does* exist is a plain empty-state conditional, never routed
- * through error.tsx.
+ * "Category doesn't exist" renders the shared `DetailNotFound` inline,
+ * the project's canonical Detail-page pattern (same as
+ * app/products/[slug]) — see docs/decisions.md for the confirmed Next.js
+ * behavior this avoids. Every other state follows the established
+ * pattern unchanged: no try/catch, so a thrown fetch error (from
+ * `getCategory` or `getProductsPage`) propagates to error.tsx; zero
+ * products in a category that *does* exist is a plain empty-state
+ * conditional, never routed through error.tsx.
  */
 export default async function CategoryPage({
   params,
@@ -132,7 +104,14 @@ export default async function CategoryPage({
 
   const category = await getCategory(slug);
   if (!category) {
-    return <CategoryNotFound />;
+    return (
+      <DetailNotFound
+        title="Category not found"
+        message="We couldn't find a category at this address — it may have been removed or the link may be out of date."
+        actionLabel="Browse all products"
+        actionHref={routes.products.index}
+      />
+    );
   }
 
   const { products, pageInfo } = await getProductsPage({

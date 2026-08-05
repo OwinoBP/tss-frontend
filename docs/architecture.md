@@ -185,58 +185,61 @@ service (getXPage: { items, pageInfo }) -> items.map(toXCard) -> XGrid -> page
 
 ### Detail pages
 
-Example: `app/products/[slug]` (`feature/product-detail`).
+Examples: `app/products/[slug]` (`feature/product-detail`),
+`app/categories/[slug]` (`feature/category-pages`).
 
 ```
 service (getX: X | null) -> toXInfo/toXGallery -> reusable presentation components -> page
 ```
 
 - **`loading.tsx`** — same `Suspense` pattern, sized to the detail
-  layout (gallery + info skeletons) instead of a grid.
-- **"Nothing to show" is `notFound()`, not an empty state.** A single
-  resource either exists or it doesn't; there's no equivalent of "zero
-  results, still a valid page." The service returns `X | null`; the page
-  calls Next's `notFound()` when it's `null`, which renders
-  `not-found.tsx` (automatically `noindex`ed by Next, no manual metadata
-  needed for that case).
-- **Distinguishing "not found" from "failed" is the one subtle part.**
-  A service function returning a nullable single resource needs to tell
-  "the backend coherently said this doesn't exist" apart from "the
-  backend didn't answer at all" — those are different states requiring
-  different Apollo error-policy handling, and getting the distinction
-  wrong routes a real outage to the wrong UI. See docs/decisions.md,
-  "Product Detail" for the specific pitfall this project hit and how it
-  was actually diagnosed (by inspecting the real resolved result shape
-  for both cases, not by assumption).
-- **`error.tsx`** — same as listing pages: a genuine thrown failure,
-  never a normal "not found."
+  layout (gallery + info skeletons for a product; a heading/breadcrumb
+  skeleton plus `ProductGridSkeleton` for a category) instead of a grid.
+- **"Nothing to show" renders `DetailNotFound` (`components/common/DetailNotFound`)
+  as a plain inline conditional — never `notFound()`/`not-found.tsx`.**
+  A single resource either exists or it doesn't; there's no equivalent of
+  "zero results, still a valid page." The service returns `X | null`; the
+  page returns `<DetailNotFound title="..." message="..." actionLabel="..."
+  actionHref="..." />` when it's `null`, and returns
+  `DETAIL_NOT_FOUND_METADATA` (same folder) — `{ robots: { index: false,
+  follow: true } }` — from `generateMetadata`'s matching branch. This is
+  the project's one canonical pattern for every Detail page, not a choice
+  made per page — **`notFound()`/`not-found.tsx` must not be used for a
+  Detail page in this project.** See docs/decisions.md, "Detail Page
+  Pattern Hardening" for the confirmed Next.js defect this avoids (a
+  route segment's mere possession of a `not-found.tsx` file causes *any*
+  uncaught error in that segment — not just a real `notFound()` call — to
+  render the not-found boundary instead of `error.tsx`), why no official
+  framework fix exists yet, and the accepted trade-off (a nonexistent
+  resource now returns HTTP `200`, not `404`, mitigated by the explicit
+  `noindex`).
+- **`error.tsx`** — a genuine thrown failure, never a normal "not found."
+  Distinguishing the two is what the `DetailNotFound` convention above
+  exists to get right; see docs/decisions.md, "Product Detail" for the
+  earlier, narrower pitfall this project hit distinguishing "not found"
+  from "failed" at the *service* layer (Apollo error-policy handling),
+  which is a separate, already-solved concern from the *page-boundary*
+  defect "Detail Page Pattern Hardening" fixes.
 - **Metadata** — `generateMetadata` builds `title`/`description`/`openGraph`
-  from the real fetched resource (a per-item image, unlike a listing page
-  which has no single representative image to offer).
+  from the real fetched resource when it exists (a per-item image for a
+  product, unlike a listing page which has no single representative image
+  to offer); returns `DETAIL_NOT_FOUND_METADATA` plus a page-specific
+  `title` when it doesn't.
 
-### Category pages: Detail and Listing composed, not a third pattern
+**`DetailNotFound` is fully generic and presentation-only** — no
+knowledge of `MusicProduct`, `Category`, a slug, a resource type,
+GraphQL, or services. Every Detail page supplies its own copy
+(`title`/`message`/`actionLabel`/`actionHref`) as props, so the shared
+component can't drift into knowing about a specific resource type. Colocated
+with it, in the same folder: `DETAIL_NOT_FOUND_METADATA`, the metadata
+fallback every Detail page's `generateMetadata` pairs with it.
 
-Example: `app/categories/[slug]` (`feature/category-pages`).
-
-```
-service (getCategory: Category | null) -> the term's own existence
-                                           (name, description, ancestors)
-      +
-service (getProductsPage: { products, pageInfo }, where: { category })
-                                        -> items.map(toXCard) -> XGrid
-   -> page
-```
-
-A category page needs both halves of what's above: the category *term*
-itself either exists or it doesn't (Detail-shaped — see
-docs/decisions.md, "Category Pages" for why this ended up handled as a
-plain inline conditional rather than `notFound()`/`not-found.tsx`, a real
-Next.js defect discovered while verifying this branch's error state, not
-a stylistic choice); the *products inside it* are a listing where zero is
-a normal, valid state (Listing-shaped, identical rules to `app/products`
-above — pagination, empty state, `error.tsx`). No new page shape was
-introduced; this composes the two already established here.
-
+**Category pages compose Detail and Listing, not a third pattern.** A
+category page needs both halves of what's documented on this page: the
+category *term* itself either exists or it doesn't (Detail-shaped, per
+above); the *products inside it* are a listing where zero is a normal,
+valid state (Listing-shaped, identical rules to `app/products` above —
+pagination, empty state, `error.tsx`). No new page shape was introduced.
 `GetProductsParams.where.category` (added in `feature/category-pages`) is
 the second filter on `ProductsQueryWhere`, alongside `search` — the same
 additive extension point predicted when `where` was first generalized
@@ -256,6 +259,10 @@ needed the identical logic — both now compose these rather than
 (`components/common/`) is fully generic (no product/commerce knowledge)
 and is the reusable piece any future page more than two levels from home
 should use, per docs/design-system.md's Navigation Principles.
+`DetailNotFound` (`components/common/`, `feature/detail-pattern-hardening`)
+is the equally generic "resource not found" piece every Detail page uses
+instead of `notFound()`/`not-found.tsx` — see "Detail pages" above and
+docs/decisions.md, "Detail Page Pattern Hardening".
 
 ## Folder philosophy
 

@@ -27,7 +27,9 @@ export function mapWooCommerceCategoryToCategory(
     // immediate-parent-first (nearest ancestor at index 0, root last) —
     // reversed here so callers building a breadcrumb trail can render
     // `ancestors` directly in root-to-leaf order. See docs/decisions.md.
-    ancestors: dto.ancestors.nodes.map(mapTermRef).reverse(),
+    // `null` for a top-level category with no parent — WPGraphQL doesn't
+    // return a clean empty connection there, confirmed live.
+    ancestors: dto.ancestors ? dto.ancestors.nodes.map(mapTermRef).reverse() : [],
   };
 }
 
