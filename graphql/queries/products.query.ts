@@ -27,14 +27,17 @@ export interface ProductsQueryData {
 /**
  * Mirrors (a subset of) WPGraphQL's own `RootQueryToProductConnectionWhereArgs`
  * — confirmed via live introspection to exist on the `products` root field,
- * not guessed. Only `search` is wired through today (feature/product-search);
- * the type is named after the real GraphQL arg rather than flattened into a
- * standalone `search?: string` query variable so a future category/brand
- * listing page can add `category`/`productBrand` here additively instead of
- * `PRODUCTS_QUERY` growing a new top-level variable per filter.
+ * not guessed. `search` (feature/product-search) and `category`
+ * (feature/category-pages) are wired through today; the type is named
+ * after the real GraphQL arg rather than flattened into standalone query
+ * variables so a future brand listing page can add `productBrand` here
+ * the same additive way, instead of `PRODUCTS_QUERY` growing a new
+ * top-level variable per filter.
  */
 export interface ProductsQueryWhere {
   search?: string;
+  /** A category's slug — confirmed live to filter to products in that single category. */
+  category?: string;
 }
 
 /**

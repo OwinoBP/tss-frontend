@@ -1237,3 +1237,216 @@ underneath it. Confirmed instead with a headless Chromium render
 copy ("We couldn't load search results right now") and the "Try again"
 button — both loading, empty, no-results, and results states were also
 screenshotted the same way for visual confirmation.
+
+## Category Pages: the third Listing implementation, and a real Next.js boundary-selection bug
+
+`feature/category-pages` adds `app/categories/[slug]` — deliberately
+scoped, like `feature/product-search`, as a validation pass for existing
+architecture as much as a feature: does taxonomy-based navigation reuse
+the Listing page pattern and the service layer's `where`-based filtering
+hook, or does it need its own shape? Mostly yes; one genuine gap
+(category metadata) needed a small, justified addition, and one real
+framework defect was found and worked around along the way.
+
+### A category page is a Detail page and a Listing page composed, not a third pattern
+
+The category *term* itself (name, description, breadcrumb ancestry) is a
+single resource that either exists or doesn't — the same shape
+`app/products/[slug]` already established for a product. The *products
+inside it* are a listing — zero is a normal, valid business state, not an
+error, same as `app/products` and `app/search`. `app/categories/[slug]/page.tsx`
+composes both: `getCategory(slug)` for the term, `getProductsPage({ where:
+{ category: slug } })` for the listing. See docs/architecture.md, "Page
+architecture patterns" for where this is now documented alongside the two
+patterns it combines.
+
+### Taxonomy strategy: confirmed via live introspection, not assumed
+
+Introspection was temporarily re-enabled (`wp eval
+'update_option("graphql_general_settings", array("public_introspection_enabled"
+=> "on"));'`, reverted via `delete_option` immediately after, same
+procedure as every prior schema investigation) to confirm, rather than
+assume:
+
+- `products`'s existing `where` argument already has `category: String`
+  (a single slug filter) — confirmed with a live query, not just present
+  in the schema. No new listing query needed; `ProductsQueryWhere` grows
+  one field (`category`), exactly the extensibility
+  `feature/product-search`'s ADR predicted for "a future category or
+  brand listing page."
+- A `productCategory(id, idType: SLUG)` root field exists for a single
+  category's own metadata (`name`, `description`, `image`, `parent`,
+  `ancestors`) — nothing existing fetches this; the only place category
+  data previously appeared was the minimal `{id, databaseId, name, slug}`
+  nested under each *product* (`productCategories.nodes`), which can't
+  populate a heading for a category with zero products. This became one
+  new query, `CATEGORY_QUERY` (`graphql/queries/category.query.ts`), with
+  no fragment (first and only consumer of this shape).
+- `ProductCategory` is confirmed hierarchical (`parent`/`children`/`ancestors`
+  connections), confirming `docs/product-model.md`'s existing assumption.
+  **`ancestors` is ordered immediate-parent-first (nearest ancestor at
+  index 0, root last)** — confirmed with a real three-level temporary
+  category tree (`Drum Kits` -> `808 Kits` -> `808 Sub Bass`), not assumed
+  from the field name. `category.mapper.ts` reverses this to root-first
+  order so `app/categories/[slug]/page.tsx` can build a breadcrumb trail
+  by mapping `ancestors` directly, without the page needing to know about
+  the reversal.
+- A bad category slug (`productCategory(id, idType: SLUG)` with a slug
+  that doesn't exist) returns a **clean `{ productCategory: null }`, with
+  no GraphQL error attached** — confirmed live, and a real difference
+  from `product(id, idType: SLUG)`'s behavior (which returns `null`
+  *alongside* a GraphQL error, the reason `getProduct` needs
+  `errorPolicy: "all"` and a `data`-vs-`data.product` check — see
+  "Product Detail" above). `getCategory` uses plain `errorPolicy: "none"`
+  (Apollo's default, made explicit) and has no "not found vs. request
+  failed" ambiguity to resolve: a thrown error always means the request
+  itself failed, a `null` `productCategory` always means "doesn't exist."
+- Verified with a real, temporary three-level category tree and two
+  temporary products (`wp wc product_cat create`, `wp wc product create`),
+  covering: a category with products, an empty leaf category (three
+  levels deep, to exercise the breadcrumb trail), and pagination
+  (`first: 1` against a two-product category, confirming `hasNextPage`/
+  `endCursor`, then the real `?after=` route). Everything was deleted
+  immediately after and the store re-queried to confirm it returned to
+  exactly its prior state (only WooCommerce's default `"uncategorized"`
+  category, zero products) — same discipline as every prior branch.
+
+### Routing: flat `/categories/[slug]`, not nested
+
+`routes.categories.detailPath` already existed (`lib/config/routes.ts`,
+unused since the configuration branch) and `Navigation` already links to
+`routes.categories.index` — both predate this branch and needed no
+change. The route stays flat (`app/categories/[slug]/page.tsx`, not
+`[...slug]`) deliberately: WordPress enforces globally-unique term slugs
+per taxonomy (`wp_insert_term` -> `wp_unique_term_slug`) regardless of
+nesting depth, confirmed structurally true for this schema (the temporary
+`808-kits`/`808-sub-bass` slugs stayed unique with no ancestor prefix
+needed to disambiguate them). A flat slug is therefore already an
+unambiguous identifier for a category at any depth — nested categories
+don't need nested URL segments to be reachable or canonical. Breadcrumbs
+(Home -> Categories -> ancestors... -> category) are built from
+`Category.ancestors`, not from the URL shape.
+
+### Service layer: `ProductsQueryWhere.category`, and a small new `category.service.ts`
+
+No `getCategoryProducts()` — `ProductsQueryWhere` (`graphql/queries/products.query.ts`)
+gains one field (`category?: string`), passed straight through to
+`PRODUCTS_QUERY`'s existing `where` variable, identical shape to how
+`search` was added. Category *metadata* has no existing home (it isn't a
+product), so it becomes `services/category.service.ts` — one new
+capability file (`getCategory`), same shape as `product.service.ts`/`site.service.ts`,
+not a class and not page-specific. `types/category.ts` (`Category`) and
+`types/dto/woocommerce-category.dto.ts` follow the same DTO -> mapper ->
+domain pipeline already established for products.
+
+**`mapImage` extracted to `services/mappers/media.mapper.ts`.** Previously
+a private function inside `product.mapper.ts`; `category.mapper.ts` needed
+the identical `WooCommerceMediaItemDto -> ProductImage` transform for
+`Category.image`. Same "colocate what's private, extract what's shared"
+rule already applied to `PRODUCT_TYPE_LABELS`/`formatMoney` in
+`feature/product-detail`. `product.mapper.ts` now imports it too, rather
+than keeping its own copy.
+
+**`stripHtml` extracted to `lib/strip-html.ts`.** Previously private to
+`app/products/[slug]/page.tsx`; `app/categories/[slug]/page.tsx` needed
+the identical plain-text transform for a category's `description` (both
+for the `<meta name="description">` and an on-page summary paragraph).
+Same extraction rationale as `mapImage` above.
+
+### SEO: page one indexed like `/products`, not blanket-`noindex`ed like `/search`
+
+Category pages are real, stable, crawlable merchandising landing pages
+(e.g. `/categories/drum-kits`) — the same category as `/products`, not
+`/search`'s internal-search case. `generateMetadata` indexes page one and
+sets `alternates.canonical` + `robots: { index: false }` only for
+`?after=...` pages, matching `/products`'s existing rule exactly (cursor
+pagination has no stable per-page URL worth indexing separately). A
+category's `description` is used for `<meta name="description">` when
+WooCommerce has one set; falls back to `storeConfig.seo.defaultDescription`
+otherwise, since WooCommerce categories are very often left without one
+(true of every temporary category created during this verification pass
+except one, set deliberately to confirm the non-fallback path too).
+
+### A real, confirmed Next.js 16.2.12 bug: `not-found.tsx`'s mere presence swallows unrelated errors
+
+This is the one finding from this branch worth flagging most prominently.
+The Detail-page half of this page's design called for the same
+`notFound()`/`not-found.tsx` convention `app/products/[slug]` already
+uses. Verifying the *error* state (a genuinely unreachable backend, same
+method as every prior branch: a second server instance with
+`NEXT_PUBLIC_GRAPHQL_ENDPOINT` pointed at an unreachable host) surfaced
+something the "not found" state's own testing couldn't have: the page
+rendered **`not-found.tsx`'s copy** ("Category not found") instead of
+`error.tsx`'s, for a network failure that never called `notFound()`
+anywhere in the code.
+
+**Isolated methodically, not assumed to be a one-off fluke:**
+
+1. Added temporary logging directly in `getCategory` and the page
+   component. The page's own `await getCategory(slug)` call demonstrably
+   *threw* (logged, with the real `TypeError: fetch failed` /
+   `ENOTFOUND` cause) — execution never reached the `if (!category) {
+   notFound(); }` line at all, confirmed by a log statement placed right
+   after the `await` never firing.
+2. Replaced the real error with a **freshly constructed, unrelated
+   `new Error("DEBUG_PLAIN_RETHROW")`**, thrown from a `try/catch` around
+   the same call, to rule out anything about the specific error's shape,
+   digest, or Apollo-specific type — same result: `not-found.tsx` still
+   rendered.
+3. Bypassed `generateMetadata`'s own (separate) call to `getCategory`
+   entirely, to rule out request-memoization between `generateMetadata`
+   and the page body (real, per Next's own docs: "`fetch` requests are
+   automatically memoized... across `generateMetadata`... Layouts,
+   Pages") as the cause — same result.
+4. **Removed `app/categories/[slug]/not-found.tsx` entirely, no other
+   change.** The identical plain thrown error then correctly reached
+   `error.tsx` (confirmed by the presence of only a `digest` in the raw
+   response, the same signature already established for
+   `app/products/error.tsx` — see "Product Search" above for why `curl`
+   alone can only confirm the digest, not `error.tsx`'s own JSX, and a
+   headless Chromium render was used for the rest).
+5. Confirmed this is **not a dev-only quirk**: reproduced identically
+   against a full `next build && next start` production server.
+6. Confirmed this is **not specific to `app/categories/[slug]`**: the
+   already-shipped `app/products/[slug]` (`feature/product-detail`)
+   exhibits the exact same behavior when tested the same way — a genuine
+   backend outage renders its `not-found.tsx` ("Product not found")
+   instead of `error.tsx`. This is a pre-existing defect in already-merged
+   code, not something this branch introduced; it was invisible until now
+   because `feature/product-detail`'s own error-boundary verification
+   (per its ADR above) tested the unreachable-backend case, but not in
+   combination with a route segment that also has a `not-found.tsx`
+   sibling — the two states were verified independently, never together.
+
+**Conclusion: in this Next.js version, a route segment's mere possession
+of a `not-found.tsx` file causes *any* uncaught error thrown during that
+segment's render — not just an actual `notFound()` call — to resolve to
+the not-found boundary instead of the error boundary.** This wasn't
+locatable in Next's own docs (`node_modules/next/dist/docs/`) as
+documented behavior, and `unstable_rethrow` (the documented tool for a
+related but opposite problem — an app's own `try/catch` accidentally
+swallowing `notFound()`'s internal control-flow error) doesn't address it.
+
+**Fix, scoped to this branch's own new route only:** `app/categories/[slug]`
+does not use `notFound()`/`not-found.tsx` at all. "Category doesn't exist"
+is rendered as a plain inline conditional in `page.tsx`
+(`CategoryNotFound`, a local component with the same copy `not-found.tsx`
+would have had), with `robots: { index: false, follow: true }` set
+explicitly in `generateMetadata` for that case — compensating manually for
+the `noindex` Next would otherwise inject automatically for a real
+`notFound()`. The one real, accepted trade-off: a nonexistent category
+slug now returns HTTP `200` rather than `404` (React Server Components
+can't set an arbitrary status code from `page.tsx` outside Next's own
+`notFound()`/`redirect()` machinery), mitigated by the explicit `noindex`
+and a clear recovery link — a known, deliberate soft-404, not an
+oversight.
+
+**`app/products/[slug]` was deliberately left unchanged.** Fixing an
+already-merged branch's defect is out of this branch's scope (see
+`feature/*`'s standing "small, single-responsibility branches" discipline
+in the project handover doc) — flagged here in detail specifically so a
+dedicated follow-up branch can apply the same fix (or a better one, if a
+future Next.js version resolves the underlying defect) without
+re-discovering it from scratch. Filing/tracking this against Next.js
+itself is also worth doing, but is outside what a WooCommerce-integration
+frontend branch owns.

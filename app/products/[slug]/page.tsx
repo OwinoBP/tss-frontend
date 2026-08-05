@@ -6,14 +6,10 @@ import { ProductInfo, toProductInfo } from "@/components/commerce/ProductInfo";
 import { Breadcrumbs } from "@/components/common/Breadcrumbs";
 import { Section } from "@/components/layout/Section";
 import { routes } from "@/lib/config";
+import { stripHtml } from "@/lib/strip-html";
 
 interface ProductDetailPageProps {
   params: Promise<{ slug: string }>;
-}
-
-/** Regex-strips tags for the plain-text `<meta name="description">` — distinct from ProductInfo's body rendering, which renders the same source HTML as-is (see docs/decisions.md's trust-boundary note). Search engines expect plain text here, not markup. */
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 export async function generateMetadata({

@@ -132,14 +132,16 @@ array. Pages consume `pageInfo` to render "next page" navigation; a
 ever want the flat list. See docs/decisions.md, "Product Catalog" for the
 full reasoning.
 
-`GetProductsParams.where` (added in `feature/product-search`) is the first
+`GetProductsParams.where` (added in `feature/product-search`) is the
 filtering hook on top of that: an object mirroring WPGraphQL's own
-`RootQueryToProductConnectionWhereArgs` shape (`{ search }` today), passed
-straight through to `PRODUCTS_QUERY`'s `where` variable. Shaped as an
-object rather than a flat `search` parameter specifically so a future
-category or brand listing page can add `where.category`/`where.productBrand`
-additively, instead of `getProductsPage` growing a new flat parameter per
-future filter. See docs/decisions.md, "Product Search."
+`RootQueryToProductConnectionWhereArgs` shape (`{ search, category }`
+today), passed straight through to `PRODUCTS_QUERY`'s `where` variable.
+Shaped as an object rather than flat parameters specifically so each new
+listing page adds a field (`category`, added additively in
+`feature/category-pages`) instead of `getProductsPage` growing a new flat
+parameter per filter — `productBrand` is the next real, schema-confirmed
+candidate whenever a brand listing page needs it. See docs/decisions.md,
+"Product Search" and "Category Pages."
 
 ## Page architecture patterns
 
@@ -211,6 +213,38 @@ service (getX: X | null) -> toXInfo/toXGallery -> reusable presentation componen
 - **Metadata** — `generateMetadata` builds `title`/`description`/`openGraph`
   from the real fetched resource (a per-item image, unlike a listing page
   which has no single representative image to offer).
+
+### Category pages: Detail and Listing composed, not a third pattern
+
+Example: `app/categories/[slug]` (`feature/category-pages`).
+
+```
+service (getCategory: Category | null) -> the term's own existence
+                                           (name, description, ancestors)
+      +
+service (getProductsPage: { products, pageInfo }, where: { category })
+                                        -> items.map(toXCard) -> XGrid
+   -> page
+```
+
+A category page needs both halves of what's above: the category *term*
+itself either exists or it doesn't (Detail-shaped — see
+docs/decisions.md, "Category Pages" for why this ended up handled as a
+plain inline conditional rather than `notFound()`/`not-found.tsx`, a real
+Next.js defect discovered while verifying this branch's error state, not
+a stylistic choice); the *products inside it* are a listing where zero is
+a normal, valid state (Listing-shaped, identical rules to `app/products`
+above — pagination, empty state, `error.tsx`). No new page shape was
+introduced; this composes the two already established here.
+
+`GetProductsParams.where.category` (added in `feature/category-pages`) is
+the second filter on `ProductsQueryWhere`, alongside `search` — the same
+additive extension point predicted when `where` was first generalized
+(see "Service layer" above and docs/decisions.md, "Product Search").
+Category term metadata (name, description, breadcrumb ancestry) has no
+product-shaped equivalent, so it gets its own small service
+(`services/category.service.ts`) and query (`graphql/queries/category.query.ts`)
+rather than being force-fit into the products query.
 
 ### Shared presentation components introduced for detail pages
 

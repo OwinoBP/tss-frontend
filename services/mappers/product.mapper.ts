@@ -1,17 +1,16 @@
 import type {
   MusicProduct,
   Money,
-  ProductImage,
   TaxonomyTerm,
   Producer,
   ProductType,
 } from "@/types/music-product";
 import type {
   WooCommerceProductDto,
-  WooCommerceMediaItemDto,
   WooCommerceProductTermDto,
 } from "@/types/dto/woocommerce-product.dto";
 import { storeConfig } from "@/lib/config";
+import { mapWooCommerceImage } from "@/services/mappers/media.mapper";
 
 // Product mapper
 //
@@ -78,8 +77,8 @@ export function mapWooCommerceProductToMusicProduct(
 
     producer: UNRESOLVED_PRODUCER,
 
-    artwork: dto.image ? mapImage(dto.image) : null,
-    gallery: dto.galleryImages.nodes.map(mapImage),
+    artwork: dto.image ? mapWooCommerceImage(dto.image) : null,
+    gallery: dto.galleryImages.nodes.map(mapWooCommerceImage),
 
     bpm: null,
     musicalKey: null,
@@ -97,15 +96,6 @@ export function mapWooCommerceProductToMusicProduct(
 
     featured: dto.featured ?? false,
     releaseDate: parseReleaseDate(dto.date),
-  };
-}
-
-function mapImage(image: WooCommerceMediaItemDto): ProductImage {
-  return {
-    url: image.sourceUrl ?? "",
-    alt: image.altText ?? "",
-    width: image.mediaDetails?.width ?? null,
-    height: image.mediaDetails?.height ?? null,
   };
 }
 

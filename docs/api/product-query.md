@@ -70,7 +70,10 @@ string }`.
 `services/product.service.ts`'s `GetProductsParams.where` passes straight
 through to this variable — `app/products/page.tsx` never sets it
 (`where: undefined`, identical to the query before this argument
-existed), `app/search/page.tsx` sets `where: { search: query }`. A blank
+existed), `app/search/page.tsx` sets `where: { search: query }`,
+`app/categories/[slug]/page.tsx` sets `where: { category: slug }`
+(`feature/category-pages` — confirmed live that `category` on this same
+`where` argument filters to a single category by slug). A blank
 query is *not* sent as `where: { search: "" }` — `app/search/page.tsx`
 trims and checks it before calling the service at all, so "no query
 submitted" never reaches WPGraphQL.
@@ -185,6 +188,46 @@ temporary product with a formatted description and querying it directly.
 This confirms the trust-boundary decision documented in docs/decisions.md
 (rendered via `dangerouslySetInnerHTML` in `ProductInfo`, since it's
 WordPress-admin-authored content, not user input).
+
+## The category query (`category.query.ts`)
+
+`feature/category-pages` adds a second, unrelated query —
+`CATEGORY_QUERY` (`graphql/queries/category.query.ts`), run through
+`services/category.service.ts`'s `getCategory(slug)`. Not part of the
+`ProductFields`/`PRODUCT_FIELDS_FRAGMENT` pipeline above: a category's own
+metadata (needed to render a heading/description even for a category with
+zero products) has no product-shaped equivalent, so it's its own DTO
+(`types/dto/woocommerce-category.dto.ts`) and mapper
+(`services/mappers/category.mapper.ts`), following the same DTO -> mapper
+-> domain shape as products.
+
+```graphql
+query Category($slug: ID!) {
+  productCategory(id: $slug, idType: SLUG) {
+    id
+    databaseId
+    name
+    slug
+    description
+    image { id sourceUrl altText mediaDetails { width height } }
+    parent { node { id name slug } }
+    ancestors { nodes { id name slug } }
+  }
+}
+```
+
+**Confirmed live: a nonexistent category slug returns a clean
+`{ productCategory: null }`, with no GraphQL error attached** — a real
+difference from the single-product query above (`product(idType: SLUG)`
+returns `null` *with* an error for a bad slug). `getCategory` uses plain
+`errorPolicy: "none"` and has no "not found vs. request failed"
+ambiguity to resolve, unlike `getProduct`.
+
+**Confirmed live: `ancestors` is ordered immediate-parent-first** (nearest
+ancestor at index 0, root last) — verified with a real three-level
+temporary category tree, not assumed from the field name.
+`category.mapper.ts` reverses this to root-first order for breadcrumb
+rendering.
 
 ## WooCommerce limitations discovered
 
