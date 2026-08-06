@@ -143,6 +143,21 @@ parameter per filter — `productBrand` is the next real, schema-confirmed
 candidate whenever a brand listing page needs it. See docs/decisions.md,
 "Product Search" and "Category Pages."
 
+`feature/filtering-and-sorting` extended the same object again —
+`minPrice`, `maxPrice`, `onSale`, and `orderby` — all confirmed live on
+`RootQueryToProductConnectionWhereArgs`, including `orderby` itself,
+which lives *inside* `where` in this schema rather than as a sibling
+query variable. No change to `PRODUCTS_QUERY`'s GraphQL document or to
+`product.service.ts` was needed for any of it: `where: $where` was
+already fully generic, and `GetProductsParams.where` already passes
+straight through. `lib/product-filters.ts` is the new small translation
+layer this branch adds — parsing a listing page's `searchParams` into a
+typed filter state, and translating a URL-facing sort slug (`?sort=price-asc`)
+to WPGraphQL's `{ field, order }` shape via `data/sort-options.ts` — kept
+deliberately separate from `where` itself so the public URL contract
+doesn't change if the schema's enum naming ever does. See
+docs/decisions.md, "Filtering and Sorting."
+
 ## Page architecture patterns
 
 Two page shapes are established, and future pages should extend one of
@@ -181,7 +196,19 @@ service (getXPage: { items, pageInfo }) -> items.map(toXCard) -> XGrid -> page
   URL worth indexing separately. `app/search` goes further and sets
   `noindex` on *every* state, first page included — see docs/decisions.md,
   "Product Search" for why a search listing's "page one" isn't the same
-  case as the catalog's.
+  case as the catalog's. `feature/filtering-and-sorting` extends this same
+  rule to any active filter/sort param on `app/products` and
+  `app/categories/[slug]` — a filtered/sorted result has no more a stable,
+  indexable identity than a paginated one (`app/search` needed no change,
+  already blanket-`noindex`).
+- **Filtering and sorting** — `components/commerce/ProductFilters`, a
+  plain GET form (no client JavaScript, an explicit "Apply" submit rather
+  than auto-submit-on-change), renders on every Listing page and reads
+  back into `lib/product-filters.ts`'s parsing helpers. Submitting it
+  drops any existing `?after=` — a changed filter/sort invalidates a prior
+  cursor — and "Next" links on all three Listing pages now preserve the
+  active filter/sort state alongside the new `after` value, not just
+  `after` alone. See docs/decisions.md, "Filtering and Sorting."
 
 ### Detail pages
 
@@ -271,9 +298,9 @@ app/            routing only — pages, layouts, route handlers
 components/
   ui/           shadcn primitives + Skeleton (unstyled building blocks)
   layout/       Container, Section, Header, Navigation, Footer, SkipToContent, Shell
-  commerce/     ProductCard, ProductGrid, ProductImage, ProductPricing, ProductGallery,
-                ProductMeta, ProductInfo (+ Skeleton loading states) — cart, checkout
-                still created on first use
+  commerce/     ProductCard, ProductGrid, ProductFilters, ProductImage, ProductPricing,
+                ProductGallery, ProductMeta, ProductInfo (+ Skeleton loading states) —
+                cart, checkout still created on first use
   music/        player, track list, waveform UI — created on first use
   marketing/    Hero, ShopByType — landing/promo sections
   common/       shared, feature-agnostic UI (e.g. Logo, Breadcrumbs)
@@ -282,6 +309,8 @@ lib/
   env.ts        typed environment access
   config/       centralized app configuration — store.ts, routes.ts, theme.ts
   format-money.ts  Money -> display string, shared by presentation mappers
+  product-filters.ts  searchParams <-> ProductsQueryWhere translation, shared by
+                       every Listing page (app/products, app/search, app/categories/[slug])
 graphql/
   queries/      GraphQL queries (e.g. site-info.ts, products.query.ts, product.query.ts)
   mutations/    created on first mutation
@@ -291,7 +320,8 @@ services/       the only callers of Apollo Client; UI's data contract
 hooks/          shared React hooks — created on first use
 types/          shared TypeScript types (e.g. MusicProduct)
   dto/          types mirroring WPGraphQL responses (e.g. WooCommerceProductDto)
-data/           static content (e.g. product-types.ts) — distinct from lib/config — see component-principles.md
+data/           static content (e.g. product-types.ts, sort-options.ts) — distinct from
+                lib/config — see component-principles.md
 ```
 
 The rule throughout: a folder is created when the first file that belongs

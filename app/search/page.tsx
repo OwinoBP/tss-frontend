@@ -4,13 +4,21 @@ import { ArrowRight } from "lucide-react";
 import { getProductsPage } from "@/services/product.service";
 import { toProductCard } from "@/components/commerce/ProductCard";
 import { ProductGrid } from "@/components/commerce/ProductGrid";
+import { ProductFilters } from "@/components/commerce/ProductFilters";
 import { Section } from "@/components/layout/Section";
 import { Button } from "@/components/ui/button";
 import { routes } from "@/lib/config";
+import {
+  buildListingQueryString,
+  hasActiveProductFilters,
+  parseProductFilterParams,
+  productFilterStateToWhere,
+  type ProductFilterParams,
+} from "@/lib/product-filters";
 import { SearchForm } from "./SearchForm";
 
 interface SearchPageProps {
-  searchParams: Promise<{ q?: string; after?: string }>;
+  searchParams: Promise<ProductFilterParams & { q?: string; after?: string }>;
 }
 
 /**
@@ -42,22 +50,38 @@ export async function generateMetadata({
  * moving part. A blank/whitespace `q` never reaches the service at all —
  * "no query submitted" and "query, zero results" are different valid
  * states, handled as separate conditionals below, neither routed through
- * error.tsx.
+ * error.tsx. feature/filtering-and-sorting adds the same price/sale/sort
+ * filters app/products and app/categories/[slug] now have, composed with
+ * `q` — `ProductFilters` carries `q` as a hidden field so submitting a
+ * filter doesn't lose the active search term.
  *
  * No try/catch here on purpose, matching app/products/page.tsx: a thrown
  * fetch error propagates to app/search/error.tsx.
  */
 export default async function SearchPage({ searchParams }: SearchPageProps) {
-  const { q, after } = await searchParams;
+  const { q, after, ...filterParams } = await searchParams;
   const query = q?.trim() ?? "";
+  const filterState = parseProductFilterParams(filterParams);
 
   const { products, pageInfo } = query
-    ? await getProductsPage({ where: { search: query }, after: after ?? null })
+    ? await getProductsPage({
+        where: { search: query, ...productFilterStateToWhere(filterState) },
+        after: after ?? null,
+      })
     : { products: [], pageInfo: { hasNextPage: false, endCursor: null } };
 
   return (
     <Section heading="Search">
       <SearchForm defaultQuery={query} />
+
+      {query ? (
+        <ProductFilters
+          action={routes.searchPath()}
+          state={filterState}
+          hiddenFields={{ q: query }}
+          className="mt-8"
+        />
+      ) : null}
 
       {!query ? (
         <p className="mt-8 text-sm text-muted-foreground">
@@ -65,7 +89,9 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         </p>
       ) : products.length === 0 ? (
         <p className="mt-8 text-sm text-muted-foreground">
-          No products found for &quot;{query}&quot;.
+          {hasActiveProductFilters(filterState)
+            ? `No products match these filters for "${query}".`
+            : `No products found for "${query}".`}
         </p>
       ) : (
         <>
@@ -74,7 +100,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             <div className="mt-8 flex justify-center">
               <Button asChild variant="outline">
                 <Link
-                  href={`${routes.searchPath(query)}&after=${encodeURIComponent(pageInfo.endCursor)}`}
+                  href={`${routes.searchPath()}${buildListingQueryString(filterState, { q: query, after: pageInfo.endCursor })}`}
                 >
                   Next
                   <ArrowRight aria-hidden="true" data-icon="inline-end" />

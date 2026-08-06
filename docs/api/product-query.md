@@ -39,51 +39,93 @@ corresponding benefit (the fragment already selects everything
 name).
 
 Verified live, end to end, against this project's actual WPGraphQL
-endpoint, three times: once for the listing query (a temporary WooCommerce
+endpoint, four times: once for the listing query (a temporary WooCommerce
 product created via `wp wc product create` — category, tag, featured
 image, regular and sale price — fetched, confirmed correctly mapped,
 then deleted); again for the single-product query in
 `feature/product-detail` (a second temporary product, this time with a
 real image gallery and an HTML-formatted description, confirmed via a
 direct `curl` against the GraphQL endpoint and then through the real
-`/products/[slug]` route, then deleted); and again for the listing
+`/products/[slug]` route, then deleted); again for the listing
 query's `where` argument in `feature/product-search` (four temporary
 products, confirming a real match, a real no-match, and real
 `where`+pagination combined via `app/search`, then deleted — see
-docs/decisions.md, "Product Search"). The store has no real products
-outside these temporary, cleaned-up tests. See "WooCommerce limitations
-discovered" below for what each surfaced.
+docs/decisions.md, "Product Search"); and again for `where`'s
+price/on-sale/orderby fields in `feature/filtering-and-sorting` (five
+temporary products with varied prices and sale status, confirming
+filtering, sorting, and pagination compose correctly together, then
+deleted — see docs/decisions.md, "Filtering and Sorting"). The store has
+no real products outside these temporary, cleaned-up tests. See
+"WooCommerce limitations discovered" below for what each surfaced.
 
-## Filtering the listing query (`where`)
+## Filtering and sorting the listing query (`where`)
 
 `PRODUCTS_QUERY` accepts an optional `$where:
 RootQueryToProductConnectionWhereArgs` variable, passed to
 `products(first: $first, after: $after, where: $where)`. Confirmed via
-live introspection (`feature/product-search`) that this argument already
-exists on the `products` root field and includes `search: String` among
-many other filters (`category`, `productBrand`, `minPrice`/`maxPrice`,
-`featured`, `onSale`, etc.) — not requested here, added only if/when a
-page actually needs one. `graphql/queries/products.query.ts` types the
-subset actually used as `ProductsQueryWhere`, currently just `{ search?:
-string }`.
+live introspection (`feature/product-search`, extended in
+`feature/filtering-and-sorting`) that this argument exists on the
+`products` root field and includes `search: String`, `category: String`,
+`minPrice`/`maxPrice: Float`, `onSale: Boolean`, `orderby: [ProductsOrderbyInput]`,
+and more not requested here (`tag`, `productBrand`, `featured`, etc. —
+real, confirmed available, added only if/when a page actually needs one).
+`graphql/queries/products.query.ts` types the subset actually used as
+`ProductsQueryWhere`:
+
+```ts
+interface ProductsQueryWhere {
+  search?: string;
+  category?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  onSale?: boolean;
+  orderby?: { field: "DATE" | "NAME" | "PRICE"; order?: "ASC" | "DESC" }[];
+}
+```
 
 `services/product.service.ts`'s `GetProductsParams.where` passes straight
-through to this variable — `app/products/page.tsx` never sets it
-(`where: undefined`, identical to the query before this argument
-existed), `app/search/page.tsx` sets `where: { search: query }`,
-`app/categories/[slug]/page.tsx` sets `where: { category: slug }`
-(`feature/category-pages` — confirmed live that `category` on this same
-`where` argument filters to a single category by slug). A blank
-query is *not* sent as `where: { search: "" }` — `app/search/page.tsx`
-trims and checks it before calling the service at all, so "no query
-submitted" never reaches WPGraphQL.
+through to this variable — `app/products/page.tsx` sets `where.orderby`
+(always, resolving to a default "newest" ordering) plus whatever
+price/sale filters are active, `app/search/page.tsx` adds `where.search`
+on top of the same, `app/categories/[slug]/page.tsx` adds `where.category`
+on top of the same. A blank search query is *not* sent as `where: {
+search: "" }` — `app/search/page.tsx` trims and checks it before calling
+the service at all, so "no query submitted" never reaches WPGraphQL.
+
+**`orderby` lives inside `where`, not as a sibling `products(...)` arg —
+confirmed via introspection, not assumed from the field's name.**
+`ProductsOrderByEnum` has more real values than this project currently
+exposes in the UI (`DATE`, `MENU_ORDER`, `MODIFIED`, `NAME`, `PARENT`,
+`POPULARITY`, `PRICE`, `RATING`, `REVIEW_COUNT`, `SLUG`) — only `DATE`,
+`NAME`, `PRICE` are wired into `data/sort-options.ts`; see
+docs/decisions.md, "Filtering and Sorting" for why `POPULARITY`/`RATING`
+were deliberately left out despite being real, confirmed-available
+fields.
+
+**Confirmed live with five temporary products of varied price/sale
+status: `minPrice`/`maxPrice` filter on the *effective* (sale-aware)
+price, not the regular price** — a product with a $30 regular / $20 sale
+price was included by `minPrice: 15`, while a product with a $15 regular
+/ $12 sale price was correctly excluded by the same filter. This is the
+behavior a customer-facing "price" filter should have.
+
+**`productType`, `productBrand`/`tag` filtering: confirmed real
+capabilities in the schema, deliberately not wired up this pass.**
+`productType` (the music-domain field, not WooCommerce's own product
+type) has no working filter path at all today — see "productType still
+has no filterable source" below. `productBrand`/`tag` filters are
+schema-real but excluded because there's no real data (`productBrands`
+still has zero terms) or browsing UI (no tag vocabulary/route exists) to
+back a facet with — see docs/decisions.md, "Filtering and Sorting."
 
 **Confirmed live: an empty `search` match returns a clean `{ nodes: [],
 pageInfo: { hasNextPage: false, endCursor: null } }`**, no error — same
 "empty is a valid state, not a failure" shape the rest of this query
-already returns for an empty catalog. `where.search` and `first`/`after`
-compose normally together (confirmed with a real multi-product match set
-and a real second page fetched through the actual cursor).
+already returns for an empty catalog. `where.search`, `where.orderby`,
+`where.minPrice`/`maxPrice`/`onSale`, and `first`/`after` all compose
+normally together (confirmed with a real multi-product match set, a real
+sorted+filtered result, and a real second page fetched through the
+actual cursor while a filter/sort stayed active).
 
 ## Fields currently retrieved, and why
 
@@ -126,6 +168,19 @@ docs/decisions.md, not guessed):
   either. See docs/decisions.md for the recommended source (a WooCommerce
   Global Product Attribute) and why category/WooCommerce's built-in type
   enum/a meta field were all ruled out.
+
+  **`productType` still has no filterable source, re-confirmed live in
+  `feature/filtering-and-sorting`.** The schema mechanism a Global
+  Product Attribute filter would use (`where.attributes`) exists, but
+  `ProductAttributeEnum` — which attribute taxonomies are actually
+  registered — has exactly one value, `NONE`: no "Product Type" attribute
+  has been created in WooCommerce. Even if it existed, every product is
+  currently mapped to the same placeholder `productType` value (see
+  "Known gaps in the mapper" below), so a filter over it wouldn't
+  distinguish anything yet either way. `productType` filtering was
+  confirmed out of scope for this branch rather than built as a
+  non-functional control — see docs/decisions.md, "Filtering and
+  Sorting."
 
 Also not requested, present in the schema but out of scope for a
 product-card query specifically: `sku`, `averageRating`, `reviewCount`,

@@ -1586,3 +1586,210 @@ with `--virtual-time-budget=15000` (the real, hydrated `error.tsx` copy —
 deleted immediately after and the store re-queried to confirm it returned
 to its exact prior state (only WooCommerce's default `"uncategorized"`
 category, zero products).
+
+## Filtering and Sorting: the same `where` extension point, one real scope cut, and a URL-to-schema translation layer
+
+`feature/filtering-and-sorting` adds price/on-sale filtering and sorting
+to all three Listing pages (`app/products`, `app/search`,
+`app/categories/[slug]`) — deliberately scoped, like the two branches
+before it, as a validation pass for whether `GetProductsParams.where`
+generalizes a third and fourth time as cleanly as `feature/product-search`'s
+own ADR predicted for `productBrand`. It does, with one addition
+(`where.orderby`, confirmed to live *inside* `where` rather than as a
+sibling arg) and one real, schema-confirmed scope cut.
+
+### Schema investigation: confirmed live, not assumed, same procedure as every prior branch
+
+Introspection was temporarily re-enabled (`wp eval
+'update_option("graphql_general_settings", array("public_introspection_enabled"
+=> "on"));'`, reverted via `delete_option` immediately after) to inspect
+`RootQueryToProductConnectionWhereArgs`, `ProductsOrderbyInput`,
+`ProductsOrderByEnum`, `OrderEnum`, and `ProductAttributeEnum` directly.
+
+**Confirmed real and usable:**
+
+- `minPrice: Float` / `maxPrice: Float` — a live test query (category
+  filter + `minPrice: 15, maxPrice: 40` against five temporary products
+  priced $10–$50, two of them on sale) confirmed the range filters on
+  **effective, sale-aware price** — a product on sale for $20 with a $30
+  regular price was included by `minPrice: 15`; a product on sale for
+  $12 with a $15 regular price was correctly excluded. This is the
+  behavior a customer-facing "price" filter should have (what they'd
+  actually pay), not a coincidence of how the fields happen to be named.
+- `onSale: Boolean` — confirmed live, returns exactly the on-sale subset.
+- `orderby: [ProductsOrderbyInput]` (`{ field: ProductsOrderByEnum!, order: OrderEnum }`)
+  — confirmed to be a field **inside** `RootQueryToProductConnectionWhereArgs`
+  itself, not a sibling `products(...)` argument the way `first`/`after`
+  are. `ProductsOrderByEnum` has more real values than this branch
+  exposes (`DATE`, `MENU_ORDER`, `MODIFIED`, `NAME`, `PARENT`,
+  `POPULARITY`, `PRICE`, `RATING`, `REVIEW_COUNT`, `SLUG`) — `DATE`,
+  `NAME`, and `PRICE` are the three actually wired into `data/sort-options.ts`;
+  see "Sort options deliberately narrowed" below for why `POPULARITY`/`RATING`
+  weren't included despite being real. Verified end-to-end against five
+  temporary products (ascending/descending price, ascending/descending
+  name, default `DATE DESC`), including composed with `category`,
+  `onSale`, `minPrice`/`maxPrice`, `search`, and a real `after` cursor
+  together — not just each capability tested in isolation.
+
+**Confirmed real but out of scope for this pass:** `tag`/`tagIn` and
+`productBrand`/`productBrandIn` both exist on `where` — not wired up.
+`productBrands` still returns zero terms (unchanged since
+`feature/product-search`'s own finding), and no tag-browsing vocabulary
+or UI exists anywhere in the app (`docs/decisions.md`, "Product Detail"
+already declined to link tags for the identical reason — no route to
+send them to). Building a facet UI with nothing real to populate it is
+exactly the kind of speculative work this project's standing practice
+avoids; both remain real, additive candidates for `ProductsQueryWhere`
+whenever a page actually needs one.
+
+### `productType` filtering: confirmed impossible today, not merely deferred
+
+This is the one finding worth flagging most prominently, since verifying
+it was explicitly asked for. `attributes: ProductAttributeQueryInput` (the
+mechanism a Global Product Attribute filter would use) exists on `where`,
+but `ProductAttributeEnum` — the enum naming which attribute taxonomies
+are actually registered — has **exactly one value, `NONE`**, confirmed
+live. No "Product Type" Global Product Attribute has been created in
+WooCommerce; `productAttributes` itself returns `null`. This is the same
+conclusion `docs/product-model.md`/`docs/decisions.md` already reached
+during the original schema investigation — re-confirmed here, unchanged.
+
+Even setting the schema gap aside, `product.mapper.ts` still maps **every**
+product to the same placeholder `productType` (`UNRESOLVED_PRODUCT_TYPE`).
+A filter over a field where every value is identical wouldn't filter
+anything meaningfully — it would just be UI that looks functional but
+never changes the result set. **Confirmed with the user before
+implementation:** `productType` filtering is excluded from this branch
+entirely, not built as a non-functional placeholder control. Revisit once
+both a real Global Product Attribute exists in WooCommerce *and*
+`product.mapper.ts` has a real per-product source for it — the same "add
+the field, the query selection, and the UI together" rule
+`docs/product-model.md`'s Future Extensions section already states.
+
+### `ProductsQueryWhere` grows again, `product.service.ts` doesn't change at all
+
+`minPrice`, `maxPrice`, `onSale`, `orderby` were added to
+`ProductsQueryWhere` (`graphql/queries/products.query.ts`) the same way
+`category` was in `feature/category-pages` — additive optional fields on
+the type WPGraphQL's own `where` argument already mirrors. `PRODUCTS_QUERY`'s
+GraphQL document needed **no change**: `where: $where` was already fully
+generic over `RootQueryToProductConnectionWhereArgs`. `product.service.ts`
+needed **no change** either: `GetProductsParams.where` already passes
+straight through as an opaque object. This is the cleanest possible
+confirmation of `feature/product-search`'s original bet on shaping `where`
+after the real GraphQL arg instead of flat parameters.
+
+### Sort options deliberately narrowed to fields the UI actually displays
+
+`data/sort-options.ts` exposes five sort keys (`newest`, `price-asc`,
+`price-desc`, `name-asc`, `name-desc`) via an opaque URL-facing slug
+(`?sort=price-asc`) rather than WPGraphQL's own enum values directly —
+confirmed with the user before implementation. Two reasons: `PRICE` and
+`NAME` are the only sort fields `ProductCard` actually surfaces (price,
+title) — `POPULARITY` (backed by `totalSales`) and `RATING` (backed by
+`averageRating`) are real, confirmed-live fields, but the card shows
+neither figure anywhere, so sorting by either would silently reorder
+results by a criterion the visitor has no way to see or verify. Second,
+keeping the URL's public contract as a project-owned slug rather than the
+raw enum name means a future WPGraphQL/plugin change to `ProductsOrderByEnum`
+only requires updating one lookup table, not every shared/bookmarked
+listing URL. `isSortKey` degrades any unrecognized or missing `sort`
+value to `DEFAULT_SORT_KEY` ("newest", `DATE DESC`) rather than erroring
+— a stale or hand-edited URL should fail soft into a normal ordering, not
+break the page.
+
+### `ProductFilters`: zero client JavaScript, confirmed with the user before implementation
+
+`components/commerce/ProductFilters` is a plain `<form method="GET">`
+with an explicit "Apply" submit button — no auto-submit-on-change, no
+`"use client"`, matching `SearchForm`'s existing zero-JS precedent rather
+than introducing a new interaction model for one new form. Promoted to
+`components/commerce/` rather than colocated like `SearchForm`: it has
+three consumers across three different route segments (`app/products`,
+`app/search`, `app/categories/[slug]`), crossing
+`docs/component-principles.md`'s own "colocate what's private, extract
+what's shared" threshold that `SearchForm` (two consumers, one route
+segment) didn't cross. No `<select>`/checkbox primitive exists yet in
+`components/ui/` — styled as plain native elements matching `Input`'s own
+focus-ring and sizing classes rather than adding a new shadcn primitive
+for a two-field need.
+
+Submitting the form has no `after` field, so it always drops any active
+pagination — the same behavior `SearchForm` already has for a resubmitted
+query, and the correct one: a changed filter/sort invalidates whatever
+cursor was in the URL before.
+
+### `lib/product-filters.ts`: the shared parse/translate layer, and the real "Next" link bug it fixes
+
+Three small pure functions, shared by all three Listing pages rather than
+tripled: `parseProductFilterParams` (raw `searchParams` → typed state),
+`productFilterStateToWhere` (state → the `ProductsQueryWhere` fields
+`getProductsPage` accepts), and `buildListingQueryString` (state + a
+page's own extra params → a query string preserving all of it).
+
+`buildListingQueryString` exists because of a real bug this branch found
+in already-merged code, not a hypothetical: every "Next" link on all
+three Listing pages built its href as `${basePath}?after=${cursor}` (or,
+on `app/search`, `${searchPath(query)}&after=${cursor}`) — correct before
+filtering existed, since `after` was the only param a "Next" link ever
+needed to add. Once a filter or sort is active, that same construction
+would silently drop it the moment a visitor clicked "Next" — page two of
+a price-sorted, on-sale-only result would quietly revert to the
+catalog's default ordering and show every product again. Fixed by
+building every "Next" href through `buildListingQueryString(filterState,
+{ ...pageSpecificParams, after: pageInfo.endCursor })` instead, verified
+directly: a real cursor obtained from a live `first: 2` query (category
+filter + `orderby: PRICE ASC`) was used to hit
+`/categories/filter-test-kits?sort=price-asc&after=<cursor>` through the
+actual Next.js route, and it correctly returned the remaining three
+products in the same price-ascending order — confirming `after`, `sort`,
+and `category` compose correctly together end-to-end, not just each
+verified in isolation.
+
+### Metadata: the existing `after`-only noindex rule widened to any active filter/sort
+
+Confirmed with the user before implementation. `app/products` and
+`app/categories/[slug]` already set `noindex` + canonical-back-to-unfiltered
+for `?after=...` pages (no stable per-page URL worth indexing separately
+under cursor pagination); `hasActiveProductFilters` extends the same
+condition to any active filter/sort param, for the identical reason — a
+filtered/sorted result has no more a stable, indexable identity than a
+paginated one. `app/search` needed no change: it was already
+blanket-`noindex` on every state. Verified live: `/products` and
+`/categories/filter-test-kits` render no `robots` meta tag by default
+(indexable) and `<meta name="robots" content="noindex, follow">` the
+instant any filter/sort param is present.
+
+### Empty state: filter-aware copy, still not an error
+
+Each Listing page's existing "zero results is a valid state" conditional
+now distinguishes "no products in the catalog/category at all" from "no
+products match the active filters" — same mechanism (a plain conditional,
+never `error.tsx`), different copy depending on
+`hasActiveProductFilters(state)`. `app/search` already had two cases
+("no query yet" vs. "query, zero results"); filtering adds a third
+distinction layered on the second, not a new mechanism.
+
+### Verified against the live backend: five temporary products, every capability, every combination
+
+Per this project's standing practice, verification used real data rather
+than fixtures: a temporary category (`filter-test-kits`) and five
+temporary products with deliberately varied prices and sale status
+(`$10`; `$30`/sale `$20`; `$50`; `$15`/sale `$12`; `$40`) were created via
+`wp wc product_cat create` / `wp wc product create`. Verified through the
+real Next.js routes (a `dev` server instance, not just direct GraphQL):
+price-ascending and name-descending sort order, on-sale-only filtering,
+a combined price-range + on-sale + sort-descending query narrowing to
+exactly one expected product, search composed with an on-sale filter
+(correctly empty) and with a sort (correctly composed), pagination
+composed with a sort and a category filter together via a real cursor,
+`ProductFilters`' rendered `<select>`/inputs correctly reflecting the
+active URL state (`selected`, `value`, `checked` attributes), the
+noindex/canonical metadata transition on both `app/products` and
+`app/categories/[slug]`, and the filter-aware vs. plain empty-state copy
+on both. The dev server log showed no errors or warnings across the full
+pass. All five products and the temporary category were deleted
+immediately after, and the store was re-queried to confirm it returned to
+its exact prior state (only WooCommerce's default `"uncategorized"`
+category, zero products) — the same discipline every prior branch's ADR
+already established.

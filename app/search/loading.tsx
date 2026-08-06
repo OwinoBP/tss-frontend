@@ -12,6 +12,12 @@ import { SearchForm } from "./SearchForm";
  * no access to searchParams), so the form renders without a prefilled
  * value — a brief, cosmetic-only mismatch with the real page's
  * `defaultQuery`, resolved the instant the real page mounts.
+ *
+ * `ProductFilters` isn't rendered here, unlike app/products/loading.tsx:
+ * the real page only shows it once a query is active (`query ? <ProductFilters
+ * .../> : null`), and this loading state — reached before a query is even
+ * known — can't tell which branch applies. Omitting it matches what the
+ * real page renders during its own "no query yet" state, not a gap.
  */
 export default function SearchLoading() {
   return (

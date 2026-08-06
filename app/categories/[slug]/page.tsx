@@ -5,17 +5,25 @@ import { getCategory } from "@/services/category.service";
 import { getProductsPage } from "@/services/product.service";
 import { toProductCard } from "@/components/commerce/ProductCard";
 import { ProductGrid } from "@/components/commerce/ProductGrid";
+import { ProductFilters } from "@/components/commerce/ProductFilters";
 import { Breadcrumbs, type Breadcrumb } from "@/components/common/Breadcrumbs";
 import { DetailNotFound, DETAIL_NOT_FOUND_METADATA } from "@/components/common/DetailNotFound";
 import { Section } from "@/components/layout/Section";
 import { Button } from "@/components/ui/button";
 import { routes, storeConfig } from "@/lib/config";
 import { stripHtml } from "@/lib/strip-html";
+import {
+  buildListingQueryString,
+  hasActiveProductFilters,
+  parseProductFilterParams,
+  productFilterStateToWhere,
+  type ProductFilterParams,
+} from "@/lib/product-filters";
 import type { Category } from "@/types/category";
 
 interface CategoryPageProps {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ after?: string }>;
+  searchParams: Promise<ProductFilterParams & { after?: string }>;
 }
 
 function categoryBreadcrumbs(category: Category): Breadcrumb[] {
@@ -36,14 +44,19 @@ function categoryBreadcrumbs(category: Category): Breadcrumb[] {
  * conventionally-excluded internal search rather than a real merchandising
  * URL. `after` (page 2+) stays non-canonical for the same reason it does on
  * app/products: forward-only cursor pagination has no stable per-page URL
- * worth indexing separately. See docs/decisions.md, "Category Pages".
+ * worth indexing separately. See docs/decisions.md, "Category Pages". An
+ * active filter/sort (feature/filtering-and-sorting) joins `after` in
+ * triggering this — same reasoning extended from just pagination, see
+ * docs/decisions.md, "Filtering and Sorting".
  */
 export async function generateMetadata({
   params,
   searchParams,
 }: CategoryPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const { after } = await searchParams;
+  const { after, ...filterParams } = await searchParams;
+  const filterState = parseProductFilterParams(filterParams);
+  const nonCanonical = Boolean(after) || hasActiveProductFilters(filterState);
   const category = await getCategory(slug);
 
   if (!category) {
@@ -69,7 +82,7 @@ export async function generateMetadata({
       description,
       images: category.image ? [category.image.url] : undefined,
     },
-    ...(after
+    ...(nonCanonical
       ? {
           alternates: { canonical: routes.categories.detailPath(slug) },
           robots: { index: false, follow: true },
@@ -100,7 +113,8 @@ export default async function CategoryPage({
   searchParams,
 }: CategoryPageProps) {
   const { slug } = await params;
-  const { after } = await searchParams;
+  const { after, ...filterParams } = await searchParams;
+  const filterState = parseProductFilterParams(filterParams);
 
   const category = await getCategory(slug);
   if (!category) {
@@ -115,7 +129,7 @@ export default async function CategoryPage({
   }
 
   const { products, pageInfo } = await getProductsPage({
-    where: { category: slug },
+    where: { category: slug, ...productFilterStateToWhere(filterState) },
     after: after ?? null,
   });
 
@@ -128,9 +142,17 @@ export default async function CategoryPage({
         </p>
       ) : null}
 
+      <ProductFilters
+        action={routes.categories.detailPath(slug)}
+        state={filterState}
+        className="mb-8"
+      />
+
       {products.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No products in this category yet.
+          {hasActiveProductFilters(filterState)
+            ? "No products in this category match these filters."
+            : "No products in this category yet."}
         </p>
       ) : (
         <>
@@ -139,7 +161,7 @@ export default async function CategoryPage({
             <div className="mt-8 flex justify-center">
               <Button asChild variant="outline">
                 <Link
-                  href={`${routes.categories.detailPath(slug)}?after=${encodeURIComponent(pageInfo.endCursor)}`}
+                  href={`${routes.categories.detailPath(slug)}${buildListingQueryString(filterState, { after: pageInfo.endCursor })}`}
                 >
                   Next
                   <ArrowRight aria-hidden="true" data-icon="inline-end" />
