@@ -21,6 +21,7 @@ function fixture(index: number): MusicProduct {
   const onSale = index % 3 === 0;
   return {
     id: String(index),
+    databaseId: index,
     slug: `fixture-product-${index}`,
     title: `Fixture Product ${index}`,
     description: "",

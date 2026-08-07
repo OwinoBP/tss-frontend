@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ApolloProvider } from "@/lib/apollo/provider";
 import { Shell } from "@/components/layout/Shell";
+import { CartProvider } from "@/components/commerce/CartProvider";
 import { storeConfig } from "@/lib/config";
 import "./globals.css";
 
@@ -35,7 +36,13 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <ApolloProvider>
-          <Shell>{children}</Shell>
+          {/* No initialCart / no cart_count cookie — deferred until a real
+              need (e.g. MiniCart) shows up, see docs/decisions.md, "Cart".
+              app/cart/page.tsx nests its own CartProvider seeded with a
+              fresh server fetch, which shadows this one for its subtree. */}
+          <CartProvider>
+            <Shell>{children}</Shell>
+          </CartProvider>
         </ApolloProvider>
       </body>
     </html>

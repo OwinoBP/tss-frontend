@@ -11,6 +11,7 @@ import type { MusicProduct } from "@/types/music-product";
 function fixture(overrides: Partial<MusicProduct>): MusicProduct {
   return {
     id: "1",
+    databaseId: 1,
     slug: "midnight-drums",
     title: "Midnight Drums Vol. 1",
     description: "",

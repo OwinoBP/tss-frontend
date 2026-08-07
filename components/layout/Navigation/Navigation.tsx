@@ -10,11 +10,11 @@ export interface NavigationItem {
 /**
  * Primary (catalog) navigation only — docs/design-system.md's Navigation
  * Principles distinguish primary nav (catalog sections) from utility nav
- * (search, cart, account). Utility items aren't included here: search,
- * cart, checkout, and account are explicitly out of scope for this branch
- * (see docs/decisions.md) — a nav item linking to an unbuilt commerce
- * feature isn't "establishing the navigation API," it's stubbing commerce
- * UI early.
+ * (search, cart, account). Cart is now real (`feature/cart`) but
+ * deliberately rendered separately, in `Header`, not appended here — this
+ * list stays catalog-only, matching the design system's "utility items are
+ * smaller/lighter, primary items carry more typographic weight" rule.
+ * Search and account remain out of scope for now (see docs/decisions.md).
  */
 const DEFAULT_ITEMS: NavigationItem[] = [
   { label: "Products", href: routes.products.index },

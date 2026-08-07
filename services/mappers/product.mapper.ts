@@ -62,6 +62,7 @@ export function mapWooCommerceProductToMusicProduct(
 ): MusicProduct {
   return {
     id: dto.id,
+    databaseId: dto.databaseId,
     // WordPress practically always sets a slug for a published product;
     // the DTO models it as nullable because the schema does, but falling
     // back to the numeric ID keeps this field meaningfully non-empty

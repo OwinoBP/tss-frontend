@@ -1793,3 +1793,207 @@ immediately after, and the store was re-queried to confirm it returned to
 its exact prior state (only WooCommerce's default `"uncategorized"`
 category, zero products) — the same discipline every prior branch's ADR
 already established.
+
+## Cart: the first persistent commerce state
+
+`feature/cart` is the storefront's first commerce domain with real,
+persistent state — a different category of problem from every prior
+branch (all read-only listing/detail pages). Scoped deliberately narrow
+for this pass: Add to Cart from the Product Detail page, a dedicated
+`/cart` page (view, update quantity, remove), and a plain header link to
+it. MiniCart (badge + popover) and a `cart_count` cookie were part of the
+original plan but explicitly deferred — see "Deliberately deferred" below.
+
+### WooCommerce capability investigation: confirmed live, not assumed
+
+Same introspection procedure as every prior branch (`wp eval
+'update_option("graphql_general_settings", ...)'`, reverted via
+`delete_option` immediately after). `wp-graphql-woocommerce` (WooGraphQL)
+1.0.3 is installed and active alongside `wp-graphql` 2.18.0 and
+`woocommerce` 10.9.4. Confirmed real: root mutations `addToCart`,
+`updateItemQuantities`, `removeItemsFromCart`, `emptyCart`, `applyCoupon`,
+`checkout`, and more; root query `cart`. `Cart`/`CartItem` shapes,
+`addToCart`'s `productId` input being WooCommerce's numeric `databaseId`
+(not the Relay global `id`), and the entire session mechanism below were
+all verified against the live backend with a real temporary product
+(created via `wp wc product create`, deleted immediately after, store
+re-confirmed at zero products) — not read off the schema alone.
+
+**The session mechanism, confirmed live via direct `curl` before any app
+code existed:** WPGraphQL is stateless. Every cart-touching request
+returns a `woocommerce-session` response header (a JWT encoding a guest
+`customer_id`), exposed via `Access-Control-Expose-Headers`. Querying
+`cart` without echoing that token back returns a different, empty guest
+cart; sending it back as `woocommerce-session: Session <token>` returns
+the same cart. `addToCart` → `updateItemQuantities` → `removeItemsFromCart`
+were each confirmed to round-trip correctly by hand this way before any
+of it was built into the app.
+
+### Apollo Client can manage the session header — confirmed by a live spike, not assumed either way
+
+The planning pass flagged a real open question: Apollo's cache-oriented
+client has no obvious way to attach a per-call dynamic request header and
+read a per-call *response* header, which the session mechanism above
+needs both directions of. The initial recommendation was to bypass Apollo
+for cart specifically (a raw `fetch()` in `cart.service.ts`), but per
+explicit instruction this was spiked against the real backend before
+committing to that.
+
+**Investigating Apollo Client v4's actual API (not assumed from
+Apollo Client 3.x training data — this project's `package.json` pins
+`@apollo/client@^4.2.9`, a materially different major version) found the
+mechanism does exist:** `HttpLink`'s request handler calls
+`operation.setContext({ response })` with the raw `fetch` `Response`
+object once a request resolves (confirmed by reading
+`node_modules/@apollo/client/link/http/BaseHttpLink.js` directly, not the
+type definitions alone) — so a link positioned before `HttpLink` can read
+an incoming response header the same way `SetContextLink`/manual
+`operation.setContext()` lets it set an outgoing request header. The one
+real API surprise: `forward(operation)` returns an `rxjs` `Observable` in
+this version, not one with a `.map()` method directly on it — needs
+`.pipe(map(...))` from `rxjs`, confirmed by hitting `TypeError:
+forward(...).map is not a function` on the first attempt and checking
+`node_modules/rxjs`'s actual exports rather than guessing the fix.
+
+**The spike itself** (`_apollo-spike.mjs`, run with `node` against the
+real backend, deleted after — never committed) built exactly this: a
+custom `ApolloLink` that reads a `sessionToken` from per-call `context`
+and injects it as the outgoing header, then after `forward(operation)`
+resolves, reads `operation.getContext().response.headers.get(...)` and
+copies it onto a mutable `sessionOut` holder object also passed via
+`context` — the only way to surface a per-call response header back to
+the caller, since Apollo's public `client.query()`/`client.mutate()`
+return value doesn't expose it directly. Run against a real temporary
+product (created via `wp wc product create`, deleted after): `addToCart`
+with no prior token succeeded and the link captured a session token;
+querying `cart` without that token returned a different, empty guest
+cart; querying `cart` *with* it returned the real 3-item cart;
+`removeItemsFromCart` with the same token correctly emptied it. **Spike
+passed — Apollo manages the full round trip correctly, so the
+implementation uses Apollo (`lib/apollo/session-link.ts` +
+`lib/apollo/cart-client.ts`), not a raw-`fetch()` bypass.** This keeps
+`cart.service.ts` consistent with every other service (`Apollo Client is
+the only network layer services call`) instead of the narrow, flagged
+deviation the planning pass had been prepared to accept.
+
+`cart-client.ts` is still a dedicated client, not a reuse of
+`rsc-client.ts` — cart calls are one-off, always-fresh operations
+(`fetchPolicy: "no-cache"`) with no reason to go through
+`registerApolloClient`'s per-request memoization, which exists to dedupe
+*reads* within a request, not to serve session-scoped mutations.
+
+### State strategy: server-authoritative, httpOnly cookie, Server Actions, a thin Context
+
+Implemented exactly as planned and approved: WooCommerce is the sole
+source of truth for cart contents/pricing/totals — nothing is computed
+independently on the client. The session token lives in an httpOnly
+cookie (`lib/cart-session.ts`), not `localStorage`, specifically because a
+Server Component (`app/cart/page.tsx`) needs to read the current cart at
+render time, which nothing client-side-only could do. `cookies().set()`
+only works inside a Server Action/Route Handler (confirmed via
+`node_modules/next/dist/docs/.../cookies.md` rather than assumed) — so
+`cart.service.ts`'s functions are deliberately framework-agnostic (take/
+return a plain `sessionToken` string) and the actual cookie write happens
+one layer up, in `lib/actions/cart.actions.ts`.
+
+Every mutating Client Component (`AddToCartButton`, `CartTable`'s
+row-level quantity/remove controls) calls a Server Action, never
+`cart.service.ts` or Apollo directly — the existing, already-documented
+rule from docs/component-principles.md, applied for the first time by a
+real feature. A Server Action's return value — a typed
+`{ ok: true; cart } | { ok: false; error }`, never a thrown error for a
+normal rejected mutation — is what updates `CartProvider`'s context;
+nothing calls `revalidatePath`, since the fresh `Cart` is already in hand.
+
+### `CartProvider`: two nested instances, not one global cart-on-every-page fetch
+
+`components/commerce/CartProvider` holds only the latest server snapshot,
+per the explicit instruction — never a client-computed patch. Where it's
+mounted took a real decision during implementation: a single global
+provider at the root layout, fetching the cart on every request (the
+`cart_count`-cookie-adjacent approach from planning), was rejected here in
+favor of **two nested instances**:
+
+- A global one in `app/layout.tsx`, seeded with `null` — costs nothing (no
+  fetch), and exists so `AddToCartButton` on a Product Detail page has
+  *some* provider to write into.
+- `app/cart/page.tsx`'s own **locally-nested** provider, seeded with that
+  request's fresh `getCart()` result. React's context nesting means this
+  shadows the global one for `CartPageContent`'s subtree specifically —
+  `/cart` always shows accurate data on every navigation (App Router
+  re-renders a route segment's own `page.tsx` on each navigation to it,
+  even client-side), without the global provider needing to re-fetch or
+  without `/cart` needing a second, parallel fetch mechanism.
+
+This means cart state isn't live-synced between an `AddToCartButton` on
+one page and `/cart` open in another tab or a prior page in history —
+accepted for this pass, the same limitation flagged in planning, and
+exactly the case a future `MiniCart` would need to solve for.
+
+### Cart page: a third page shape, not forced into Listing or Detail
+
+`/cart` fits neither documented pattern: it's not paginated and has no
+"zero is a normal state vs. filtered narrowly" concept (Listing), and it's
+not "a single resource that either exists or doesn't" (Detail) — a cart
+always exists, even empty. Rather than force-fit it, it's documented as
+its own small shape in docs/architecture.md: a Server Component read
+(`getCart`, the same "reads are a normal Server Component job" rule every
+other page follows — not a Server Action, which exists for mutations
+only) seeding a locally-nested `CartProvider`, with "empty" as a plain
+conditional in `CartPageContent` — the same "empty isn't an error"
+instinct the Listing pages already established, applied to a page that
+isn't a Listing page.
+
+### `CartTable`/`CartSummary` stay prop-driven, not `useCart()`-coupled
+
+Per docs/component-principles.md's Storybook-isolation guidance,
+`CartTable` and `CartSummary` take `items`/`onCartChange` and
+`subtotal`/`total`/`totalTax` as plain props rather than reading
+`useCart()` internally — `app/cart/CartPageContent.tsx` (the one small
+Client Component actually coupled to context) wires
+`onCartChange={setCart}`. This keeps both components renderable with
+fixture props alone, the same reusability bar `ProductGrid`/`ProductCard`
+already meet.
+
+### `MusicProduct.databaseId`: a small, justified additive field
+
+`addToCart`'s `productId` input is WooCommerce's numeric `databaseId`, not
+the Relay global `id` `MusicProduct.id` already exposes — and `id` is
+explicitly documented as opaque, not something to decode client-side. The
+DTO already carried `dto.databaseId` (added earlier for a slug fallback)
+but the mapper discarded it. Fixed by adding `databaseId: number` to
+`MusicProduct` and mapping it straight through — the same kind of small,
+real-requirement-driven additive change as `artwork` becoming nullable,
+not a speculative widening. Three `app/dev/*` fixture objects needed the
+same field added, caught by `tsc --noEmit` rather than missed silently.
+
+### Deliberately deferred: MiniCart popover, `cart_count` cookie
+
+Both were part of the original plan's recommendation but explicitly
+excluded from this pass's scope. `Header` links to `/cart` as a plain text
+utility link (`routes.cart`, unused since the configuration branch) —
+no live item count, no popover. This means `Header`/`Shell` fetch nothing
+cart-related on any page except `/cart` itself: exactly the "don't pay a
+per-page cost for a feature not built yet" outcome the planning pass's
+`cart_count`-cookie proposal was trying to achieve for a real MiniCart,
+achieved here more simply by not building the thing that would have
+needed it. Revisit both together whenever a header cart indicator is
+actually wanted.
+
+### Verified end-to-end against the live backend, through a real browser, not just service-level checks
+
+A temporary product (`wp wc product create`) was used for two separate
+live verifications: the Apollo-session spike above (direct `curl`/`node`
+calls, before any app code existed), and, once the full feature was
+built, a real browser session (Playwright/Chromium, driven from a script,
+not `curl`) against a real `next dev` server: visited the product's
+detail page, clicked the real "Add to Cart" button, confirmed the
+`woo_cart_session` cookie was set and `httpOnly`, navigated to `/cart` and
+confirmed the item appeared, increased its quantity via the real +
+button, **reloaded the page and confirmed the updated quantity and totals
+survived the refresh** (the actual point of an httpOnly-cookie-backed,
+server-authoritative cart), removed the item via the real button, and
+confirmed the empty state also persisted across a second reload. The
+temporary product was deleted immediately after each verification pass
+and the store re-confirmed at zero products, the same discipline every
+prior branch's ADR already established.

@@ -9,6 +9,13 @@
 export interface MusicProduct {
   /** Stable unique identifier. Opaque — treat as an ID, not a parseable value. */
   id: string;
+  /**
+   * Plain WooCommerce/WordPress post ID. `id` above is a Relay global ID,
+   * deliberately opaque; this is the raw integer several WooCommerce
+   * mutations require directly (e.g. `addToCart`'s `productId` input,
+   * confirmed via live introspection — see docs/decisions.md, "Cart").
+   */
+  databaseId: number;
   /** URL-safe identifier used for routing (e.g. `/products/{slug}`). */
   slug: string;
 

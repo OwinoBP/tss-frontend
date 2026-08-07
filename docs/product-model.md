@@ -86,6 +86,7 @@ these are verified field paths, not assumptions:
 | Field | WPGraphQL source |
 |---|---|
 | `id` | `SimpleProduct.id` (Relay global ID) |
+| `databaseId` | `SimpleProduct.databaseId` — added in `feature/cart`; the raw WooCommerce post ID several cart mutations require directly (`addToCart`'s `productId` input), deliberately separate from `id`, which stays opaque |
 | `slug` | `SimpleProduct.slug` |
 | `title` | `SimpleProduct.name` — WooCommerce's title field is called `name`, not `title` |
 | `description` | `SimpleProduct.description` |

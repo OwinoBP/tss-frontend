@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getProduct } from "@/services/product.service";
 import { ProductGallery, toProductGallery } from "@/components/commerce/ProductGallery";
 import { ProductInfo, toProductInfo } from "@/components/commerce/ProductInfo";
+import { AddToCartButton } from "@/components/commerce/AddToCartButton";
 import { Breadcrumbs } from "@/components/common/Breadcrumbs";
 import { DetailNotFound, DETAIL_NOT_FOUND_METADATA } from "@/components/common/DetailNotFound";
 import { Section } from "@/components/layout/Section";
@@ -78,7 +79,10 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
       />
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2 lg:gap-12">
         <ProductGallery {...toProductGallery(product)} />
-        <ProductInfo {...toProductInfo(product)} />
+        <div className="flex flex-col gap-6">
+          <ProductInfo {...toProductInfo(product)} />
+          <AddToCartButton productId={product.databaseId} />
+        </div>
       </div>
     </Section>
   );

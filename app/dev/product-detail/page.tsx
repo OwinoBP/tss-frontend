@@ -13,6 +13,7 @@ import type { MusicProduct } from "@/types/music-product";
  */
 const FIXTURE: MusicProduct = {
   id: "1",
+  databaseId: 1,
   slug: "midnight-drums",
   title: "Midnight Drums Vol. 1",
   description:
