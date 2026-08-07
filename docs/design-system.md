@@ -98,12 +98,12 @@ unless it's literally true and relevant.
   required; a deliberate future option, not a gap to fill immediately.
 
 **Implementation note:** `app/globals.css`'s `@theme inline` block
-currently defines `--font-sans: var(--font-sans)` — a self-reference that
-doesn't resolve to the loaded Geist Sans variable
-(`--font-geist-sans`). `--font-mono` is wired correctly
-(`var(--font-geist-mono)`). This is a pre-existing wiring gap, not
-something this documentation-only branch changes — flagged here so
-whoever implements this system fixes it rather than rediscovering it.
+correctly wires `--font-sans: var(--font-geist-sans)` and
+`--font-mono: var(--font-geist-mono)` to the variables `next/font/google`
+loads in `app/layout.tsx`. Confirmed rendering as Geist (not a fallback)
+via computed style during `feature/ui-tokens`. An earlier version of this
+note described a `--font-sans` self-reference defect that does not exist
+in the code as implemented — corrected here rather than left standing.
 
 ### Font weights
 
@@ -173,55 +173,78 @@ mechanism rather than inventing a parallel one.
 | **Surface Overlay** | Floating surfaces — popovers, dropdowns, tooltips. | `--popover` | Exists |
 | **Text Primary** | Default text color — headings, body, anything that should be fully legible. | `--foreground` | Exists |
 | **Text Secondary** | De-emphasized text — metadata, captions, helper text. Never used for anything that must be read; only for things that support the primary text. | `--muted-foreground` | Exists |
-| **Accent** | The one interactive/brand color. Primary CTAs, active states, links, the sale-price emphasis. Used sparingly — see below. | `--primary` | Exists, currently neutral (near-black/white) — see recommendation below |
-| **Accent Foreground** | Text/icon color on top of an Accent-colored surface. | `--primary-foreground` | Exists |
+| **Accent** | The one interactive/brand color. Primary CTAs, active states, links, the sale-price emphasis. Used sparingly — see below. | `--primary` | Exists — implemented `feature/ui-tokens` |
+| **Accent Foreground** | Text/icon color on top of an Accent-colored surface. | `--primary-foreground` | Exists — re-verified `feature/ui-tokens` (see below) |
 | **Secondary Action** | Lower-emphasis interactive surfaces — secondary buttons, selected filter chips. | `--secondary` | Exists |
 | **Muted Fill** | Subtle background fills — disabled states, skeleton loaders, hover backgrounds on ghost elements. | `--muted` | Exists |
 | **Border** | Dividers, card outlines, input borders. | `--border` | Exists |
 | **Focus Ring** | Keyboard focus indicator. See Accessibility Principles. | `--ring` | Exists |
-| **Success** | Confirmation states — order placed, item added. | `--success` / `--success-foreground` | **(proposed — not yet in globals.css)** |
-| **Warning** | Caution states — low stock, sale ending soon. | `--warning` / `--warning-foreground` | **(proposed — not yet in globals.css)** |
-| **Danger** | Errors, destructive actions, validation failures. | `--destructive` | Exists — `--destructive-foreground` is **not** yet defined; needed for text on a solid danger background |
+| **Success** | Confirmation states — order placed, item added. | `--success` / `--success-foreground` | Exists — implemented `feature/ui-tokens`, no consumer yet |
+| **Warning** | Caution states — low stock, sale ending soon. | `--warning` / `--warning-foreground` | Exists — implemented `feature/ui-tokens`, no consumer yet |
+| **Danger** | Errors, destructive actions, validation failures. | `--destructive` | Exists. `--destructive-foreground` exists — implemented `feature/ui-tokens`, no consumer yet |
 
-### Why Accent is currently neutral, and what to do about it
+### Accent is implemented — a warm, low-saturation gold/amber
 
-The existing scaffold (`shadcn` "neutral" base color) ships with `--primary`
-set to near-black/white — effectively no color at all. That's not
-accidental-looking by coincidence; it's consistent with "restrained colour
-palette" and "artwork-first": if the *interface* is monochrome, product
-artwork is the only source of color on any given page, which is exactly
-the hierarchy this system wants. Recommendation: **keep the interface
-fundamentally grayscale**, and introduce exactly one accent hue used only
-for functional emphasis (primary CTA, active/selected state, sale
-indicator) — not as a decorative brand wash across the UI.
+`--primary` is `oklch(0.7 0.15 75)` light / `oklch(0.78 0.15 75)` dark,
+replacing the prior neutral (near-black/white) scaffold value — this is
+the real, cited value per this document's grounding policy, not a
+recommendation pending sign-off anymore. The interface otherwise stays
+fundamentally grayscale — this is still exactly one accent hue used for
+functional emphasis (primary CTA, active/selected state, sale indicator),
+not a decorative brand wash. It reads as premium and faintly evokes
+analog audio gear (brass, vinyl) without being loud, and was chosen to
+still work once real product photography is in view — "artwork-first"
+means the accent must not compete with whatever color the catalog's
+imagery happens to be.
 
-**(Proposed)** A warm, low-saturation gold/amber (`oklch(0.7 0.15 75)` light
-/ `oklch(0.78 0.15 75)` dark, as a starting point) reads as premium and
-faintly evokes analog audio gear (brass, vinyl) without being loud. This
-is a starting recommendation for implementation, not a final brand
-decision — actual hue selection should be signed off with real product
-photography in view, since "artwork-first" means the accent must not
-compete with whatever color the catalog's imagery happens to be.
+**Naming note:** shadcn's scaffold separately defines `--accent`/
+`--accent-foreground` (a near-white hover-tint role, currently unused by
+any component). That pair is *not* this system's "Accent" role — the
+Accent role documented in this section has always mapped to `--primary`,
+per the table above. Reach for `--primary`, not `--accent`, when
+implementing anything this document calls "Accent."
 
-### Proposed additions (starting values, pending sign-off)
+`--primary-foreground` was re-verified against the new `--primary` value
+(WCAG AA, both themes) rather than carried over unchanged from the old
+neutral scaffold. It is now `oklch(0.145 0 0)` (near-black) in light
+theme — the prior near-white scaffold value did not hold sufficient
+contrast against the new accent. Dark theme's value did not need to
+change (`oklch(0.205 0 0)`, near-black, already passed). See
+Accessibility Principles.
 
-Given as concrete, usable defaults so implementation isn't blocked — not
-as final values. Chosen to match the lightness/chroma character of the
-existing `--destructive` token (`oklch(0.577 0.245 27.325)` light /
-`oklch(0.704 0.191 22.216)` dark) so all three semantic colors read as one
-consistent family:
+### Success, Warning, and Danger-foreground are implemented
 
 | Token | Light | Dark |
 |---|---|---|
 | `--success` | `oklch(0.6 0.14 152)` | `oklch(0.72 0.16 152)` |
-| `--success-foreground` | `oklch(0.985 0 0)` | `oklch(0.145 0 0)` |
+| `--success-foreground` | `oklch(0.145 0 0)` | `oklch(0.145 0 0)` |
 | `--warning` | `oklch(0.75 0.16 80)` | `oklch(0.8 0.16 80)` |
 | `--warning-foreground` | `oklch(0.145 0 0)` | `oklch(0.145 0 0)` |
-| `--destructive-foreground` | `oklch(0.985 0 0)` | `oklch(0.985 0 0)` |
+| `--destructive-foreground` | `oklch(0.985 0 0)` | `oklch(0.145 0 0)` |
+
+All three follow the same lightness/chroma family as the existing
+`--destructive` token so they read as one consistent set, and all three
+have been verified against WCAG AA in both themes (see Accessibility
+Principles) — including re-deriving which foreground (near-black vs.
+near-white) actually passes for each color/theme combination, rather than
+assuming one light/dark split applies uniformly across tokens.
+`--success-foreground` turned out to need near-black in *both* themes
+(an earlier starting recommendation had it near-white in light theme,
+which did not hold sufficient contrast against `--success`'s light
+value). `--destructive-foreground` needs the opposite split — near-white
+in light theme, near-black in dark theme, since dark theme's
+`--destructive` is a lighter, less saturated red than a naive "dark theme
+means darker" assumption would suggest. `--warning-foreground` stays
+near-black in both themes, as already documented below.
 
 Warning's foreground stays dark text in both modes — amber/yellow hues
 stay perceptually light even in a "dark" token, so dark text remains the
 higher-contrast choice either way.
+
+None of `--success`/`--warning`/`--destructive-foreground` has a real
+consumer in the codebase yet — they exist as verified, ready vocabulary
+for the UI branches this token foundation supports, not retrofitted onto
+anything today.
 
 ### Usage rule
 
@@ -286,22 +309,38 @@ per-component radii.
 
 ## Shadow system
 
-**(Proposed — no shadow tokens exist in `app/globals.css` yet.)** Kept
-deliberately subtle — heavy shadows read as busy and contradict "minimal
-distractions." Shadows exist to indicate elevation, never for decoration.
+Kept deliberately subtle — heavy shadows read as busy and contradict
+"minimal distractions." Shadows exist to indicate elevation, never for
+decoration.
 
-| Token | Value (light mode) | Usage |
-|---|---|---|
-| `shadow-sm` | `0 1px 2px rgb(0 0 0 / 0.04)` | Inputs, small controls — barely-there separation |
-| `shadow-md` | `0 2px 8px rgb(0 0 0 / 0.06)` | Resting card elevation |
-| `shadow-lg` | `0 8px 24px rgb(0 0 0 / 0.08)` | Hover elevation, dropdowns, popovers |
-| `shadow-xl` | `0 16px 48px rgb(0 0 0 / 0.12)` | Modals, dialogs |
+| Token | Value (light mode) | Usage | Status |
+|---|---|---|---|
+| `shadow-sm` | `0 1px 2px rgb(0 0 0 / 0.04)` | Inputs, small controls — barely-there separation | CSS variable exists (`app/globals.css`); no consumer yet, so not yet registered as a Tailwind utility |
+| `shadow-md` | `0 2px 8px rgb(0 0 0 / 0.06)` | Resting card elevation | Same as above |
+| `shadow-lg` | `0 8px 24px rgb(0 0 0 / 0.08)` | Hover elevation, dropdowns, popovers | **Exists as a real Tailwind utility** — `SkipToContent`'s `focus:shadow-lg` is a genuine existing consumer, so this one was registered in `@theme inline` rather than left as a bare variable |
+| `shadow-xl` | `0 16px 48px rgb(0 0 0 / 0.12)` | Modals, dialogs | CSS variable exists; no consumer yet |
+
+Following this project's standing "extract on real use" precedent (see
+`docs/decisions.md`): the underlying CSS custom properties for all four
+tokens were implemented in `feature/ui-tokens` (both themes), but only
+`shadow-lg` was promoted to a registered Tailwind utility, since it's the
+only one an existing component actually needs. `shadow-sm`/`shadow-md`/
+`shadow-xl` are available today via `shadow-[var(--elevation-sm)]`-style
+arbitrary-value syntax if a real need appears before their own dedicated
+branch; otherwise, promote each into `@theme inline` the same way
+`shadow-lg` was, the first time a real consumer needs it.
 
 **Dark mode:** shadows read poorly on dark backgrounds (they mostly
-disappear or look muddy). Prefer a subtle border or a one-step-lighter
-surface color to indicate elevation in dark mode rather than a darker
-shadow — reduce shadow opacity further if one is used at all, don't just
-reuse the light-mode values.
+disappear or look muddy). Values are roughly half the light-mode opacity,
+consistent with this section's existing preference for a subtle,
+barely-there elevation cue over a darker shadow in dark mode:
+
+| Token | Value (dark mode) |
+|---|---|
+| `shadow-sm` | `0 1px 2px rgb(0 0 0 / 0.02)` |
+| `shadow-md` | `0 2px 8px rgb(0 0 0 / 0.03)` |
+| `shadow-lg` | `0 8px 24px rgb(0 0 0 / 0.04)` |
+| `shadow-xl` | `0 16px 48px rgb(0 0 0 / 0.06)` |
 
 ---
 
@@ -579,10 +618,14 @@ tap-area consideration on touch devices, not just visual sizing.
   suppress the focus outline without providing an equally visible
   replacement.
 - **Contrast expectations.** WCAG AA minimum: 4.5:1 for body text, 3:1
-  for large text (18px+/14px+bold) and UI component boundaries. This is
-  binding on the proposed Accent/Success/Warning color values above once
-  a final hue is chosen — verify contrast against both `--background` and
-  `--card` before shipping any color decision, not just against white.
+  for large text (18px+/14px+bold) and UI component boundaries, verified
+  against both `--background` and `--card`, not just against white. The
+  Accent, Success, Warning, and Danger-foreground values in the Colour
+  System above have been verified against this standard in both light and
+  dark themes as of `feature/ui-tokens` — including `--primary-foreground`
+  and `--destructive-foreground`, whose light/dark values were adjusted
+  where the initial starting recommendation didn't hold. Any future change
+  to a token's value needs the same re-verification, not a one-time check.
 - **Touch target sizing.** Minimum 44×44px for any touch-operable
   control, per WCAG/platform guidance. **Flag for implementation:** the
   existing `Button` component's default size is `h-8` (32px), and several

@@ -2321,3 +2321,106 @@ completable in a non-development environment; payment gateway
 integrations (Stripe/PayPal/etc. — explicitly out of scope, offline
 gateways only this pass); saved addresses and account creation, once
 account pages exist; order history/invoices, coupons UI at checkout.
+
+## Design tokens: adopting semantic tokens as the storefront's single theming surface
+
+`feature/ui-tokens` is the foundation branch for the Sample Select UI
+modernization initiative (`docs/plans/ui-architecture-review.md`) —
+scoped as presentation-only, no architecture change. **Decision: adopt
+semantic design tokens (Accent, Success, Warning, Danger-foreground, a
+shadow/elevation scale) as the storefront's sole theming surface, with
+`docs/design-system.md` as the single canonical source for their actual
+values.** This document records the decision and the reasoning; it
+deliberately does not restate the token values themselves — that would
+create a second source of truth for numbers that already have one. See
+`docs/design-system.md`'s Colour System and Shadow System sections for
+the real, current values.
+
+### Existing tokens carried the theming surface already; this branch is a value change, not a new mechanism
+
+A full-repo audit before implementation found zero hardcoded colors
+anywhere outside `app/globals.css`, and exactly two consumers of
+`--primary` — `components/ui/button.tsx` and `components/ui/badge.tsx`,
+both shared primitives every "Add to Cart"/"Checkout"/"Place order"
+control in the app already renders through. This confirmed the
+architecturally correct move was giving the *existing* `--primary` token
+a real value, not introducing a new, differently-named token — every
+consumer picks up the new value with zero component code changed, which
+is the whole point of a semantic (role-based) token system over
+component-level color props.
+
+### A real naming collision, resolved by documentation rather than a rename
+
+shadcn's scaffold separately defines `--accent`/`--accent-foreground` (a
+near-white hover-tint role, unused by any component). This is a different
+role from what `docs/design-system.md`'s Colour System has always called
+"Accent," which maps to `--primary`. Implementing the new brand color on
+the wrong variable would have shipped a token change with no visible
+effect anywhere. Resolved by adding a clarifying note to
+`design-system.md` rather than renaming shadcn's `--accent` — a rename
+would touch component internals this branch's scope explicitly excludes,
+and the collision is fully addressed by documentation once someone
+implementing a later branch knows to look for it.
+
+### Foreground pairings were re-verified against WCAG AA, not carried over from the starting recommendation
+
+`design-system.md` had proposed starting values for Accent/Success/
+Warning/Danger-foreground "pending sign-off." Implementing them required
+actually checking contrast, not assuming the starting recommendation
+would hold — and it didn't, in three of four cases: the light-theme
+Accent-foreground pairing, the light-theme Success-foreground pairing,
+and the dark-theme Danger-foreground pairing each needed a different
+near-black/near-white choice than originally proposed once verified.
+Foreground values now vary independently per token per theme based on
+what the actual lightness of each color demands, rather than a single
+light-theme/dark-theme convention applied uniformly — the same principle
+`design-system.md` already established for Warning's foreground, now
+applied consistently across every semantic color pairing this branch
+touches. See `docs/design-system.md`'s Colour System and Accessibility
+Principles sections for the verified pairings; exact contrast ratios are
+not recorded as a standing document — they were verified as part of this
+branch's review, and any future change to a token's value requires the
+same re-verification, not a lookup against a stale number.
+
+### Shadow tokens: extract on real use, applied to Tailwind utility registration
+
+Consistent with this project's standing "extract once a real, second
+consumer needs it" precedent (see "Two more real duplications, extracted
+rather than copy-pasted" above) — applied here to *utility registration*,
+not component logic. All four shadow tokens' underlying CSS custom
+properties were implemented (both themes), but only `shadow-lg` was
+registered as an actual Tailwind utility override, because it has a real
+existing consumer (`SkipToContent`'s `focus:shadow-lg`, previously
+resolving to Tailwind's generic default). `shadow-sm`/`shadow-md`/
+`shadow-xl` have no current consumer, so they stay as available CSS
+variables rather than being exposed as utility classes nothing uses yet —
+promote each individually the first time a real component needs it.
+
+### A documented defect that no longer existed, corrected rather than re-fixed
+
+`design-system.md` described a `--font-sans` self-reference bug in
+`app/globals.css`. Direct inspection of the current file and
+`app/layout.tsx`, plus a computed-style check in a real browser
+(`font-family` resolves to `Geist, "Geist Fallback"`, not a fallback
+stack), confirmed the wiring is already correct — the documented defect
+does not exist in the code as it stands. The documentation was corrected
+to match reality rather than the code being "re-fixed" for a problem that
+wasn't there; verifying before acting on a stale doc claim is the same
+discipline this project has applied to every prior branch's live
+investigations, applied here to an internal doc claim instead of a
+WooCommerce/WPGraphQL one.
+
+### Verification
+
+`tsc --noEmit`, `eslint`, and `next build` all pass with zero warnings.
+Manually verified in a real browser, both themes (light via default
+render, dark via forcing the `.dark` class the same way the app's own
+dark-mode mechanism works): a real product's "Add to Cart" button, the
+cart page's primary "Proceed to Checkout" button, and the cart's
+destructive "Remove" control, using a temporary product created and
+deleted the same way every prior branch's live verification has (store
+re-confirmed at zero products/orders afterward). No `.tsx`/`.ts` file
+changed — confirmed via `git diff` before considering the branch
+complete, matching this branch's core invariant: components change in
+appearance only because a semantic token now resolves to a different
+value, never because a component was edited.
