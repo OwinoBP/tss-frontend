@@ -1,6 +1,5 @@
 import type {
   MusicProduct,
-  Money,
   TaxonomyTerm,
   Producer,
   ProductType,
@@ -11,6 +10,7 @@ import type {
 } from "@/types/dto/woocommerce-product.dto";
 import { storeConfig } from "@/lib/config";
 import { mapWooCommerceImage } from "@/services/mappers/media.mapper";
+import { parseMoney } from "@/lib/parse-money";
 
 // Product mapper
 //
@@ -91,9 +91,9 @@ export function mapWooCommerceProductToMusicProduct(
     // zero (rather than throwing) keeps one incomplete product from
     // breaking an entire product list.
     regularPrice: dto.regularPrice
-      ? parseMoney(dto.regularPrice)
+      ? parseMoney(dto.regularPrice, FALLBACK_CURRENCY)
       : { amount: 0, currency: FALLBACK_CURRENCY },
-    salePrice: dto.salePrice ? parseMoney(dto.salePrice) : null,
+    salePrice: dto.salePrice ? parseMoney(dto.salePrice, FALLBACK_CURRENCY) : null,
 
     featured: dto.featured ?? false,
     releaseDate: parseReleaseDate(dto.date),
@@ -105,22 +105,6 @@ function mapTerm(term: WooCommerceProductTermDto): TaxonomyTerm {
     id: term.id,
     name: term.name ?? "",
     slug: term.slug ?? "",
-  };
-}
-
-/**
- * WooCommerce/WPGraphQL price fields are documented as pre-formatted
- * display strings (see docs/product-model.md), which may include a
- * currency symbol or other formatting depending on store locale settings.
- * Stripping everything but digits/decimal/minus is a defensive parse, not
- * verified against real data — this store has no products yet to test
- * against. Revisit once real priced products exist.
- */
-function parseMoney(raw: string): Money {
-  const amount = Number(raw.replace(/[^0-9.-]/g, ""));
-  return {
-    amount: Number.isFinite(amount) ? amount : 0,
-    currency: FALLBACK_CURRENCY,
   };
 }
 

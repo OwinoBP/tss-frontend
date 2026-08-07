@@ -12,6 +12,8 @@ export const CART_FIELDS_FRAGMENT = gql`
     subtotal
     total
     totalTax
+    needsShippingAddress
+    chosenShippingMethods
     contents {
       itemCount
       nodes {

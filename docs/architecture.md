@@ -366,6 +366,73 @@ shown — see docs/decisions.md. `Header` links to `/cart` as a plain text
 utility nav link (routes.cart, previously unused since the configuration
 branch), not a live badge.
 
+## Checkout
+
+`feature/checkout` adds order placement — Phase 1 scope: a billing
+address, a conditional shipping address, a payment-method choice, and
+order submission, ending in an inline confirmation. Full investigation,
+the framework bug this branch had to design around, and the live-verified
+reasoning behind every decision below: docs/decisions.md, "Checkout".
+
+**Order gets its own domain model, via the same DTO -> Mapper -> Domain
+pipeline as every other WooCommerce resource** — `types/dto/woocommerce-checkout.dto.ts`
+-> `services/mappers/checkout.mapper.ts` -> `types/order.ts` (`Order`,
+`OrderAddress`, `PaymentGateway`). Order carries fields (billing/shipping
+addresses, order number, status, payment method) that `Cart` has no place
+for, so it isn't force-fit into the Cart type — the same reasoning that
+already justified Product and Category each having their own domain model
+instead of a shared "WooCommerce resource" type.
+
+**The checkout process composes the existing Cart domain, not a new one.**
+`app/checkout/page.tsx` reads the live cart via the same `getCart`
+`/cart` already uses (same session token, same `Cart` type) for the
+read-only order summary — no separate "checkout cart" concept. What's new
+is strictly the billing/shipping form, the `checkout` mutation, and the
+`Order` it returns. `Cart` gained two additive fields for this
+(`needsShippingAddress`, `chosenShippingMethods`) — confirmed live to
+reflect real store shipping-method configuration, not just "does this
+cart contain a physical product"; see docs/decisions.md.
+
+**Session handling reuses `cart-client.ts`/`session-link.ts` directly** —
+`checkout` is itself a session-scoped mutation needing the identical
+`woocommerce-session` round trip as every cart mutation, confirmed live.
+No new Apollo client. `services/checkout.service.ts` follows
+`cart.service.ts`'s exact shape: framework-agnostic functions taking/
+returning a plain `sessionToken`.
+
+**WooCommerce enforces almost no required-field validation on `checkout`
+itself** — confirmed live, an order was created with a completely empty
+billing address. `lib/checkout-validation.ts` is this app's own
+required-field/email-format/country-enum validation, run inside
+`lib/actions/checkout.actions.ts` — HTML5 `required`/`type="email"` on
+the form is a progressive-enhancement nicety, not the real check.
+
+**A successful checkout redirects; it doesn't return a value the client
+renders inline.** `lib/actions/checkout.actions.ts` calls `redirect()` to
+`/checkout/success/[orderNumber]` (confirmation data as query params, from
+the already-mapped `Order` — no second GraphQL call) rather than returning
+`{ ok: true, order }` for a client component to hold in state. This is a
+direct consequence of a confirmed Next.js 16 behavior: a Server Action
+that mutates cookies (`clearCartSessionToken()`) triggers an automatic
+server-side re-render of the current route bundled into the same action
+response, which silently replaced an earlier inline-success design's
+client state before it ever rendered — see docs/decisions.md, "Checkout"
+for the full discovery.
+
+**`order.id` (the Relay global ID) is never requested.** Confirmed live,
+reproducible: resolving it on the `Order` returned by `checkout` throws
+"Internal server error" for a guest order. `databaseId`/`orderNumber` are
+used instead — the same `databaseId`-for-mutations precedent
+`MusicProduct.databaseId` already established.
+
+**Payment method is a real, queried list (`paymentGateways`), not
+hardcoded — and this store currently has zero enabled.** All three
+installed offline gateways (bacs/cheque/cod) start disabled; `CheckoutForm`
+handles an empty list by disabling submission with an explicit message
+rather than assuming at least one gateway exists. Enabling a gateway is a
+WooCommerce admin task flagged in Known Limitations, not something this
+branch's code can fix.
+
 ## Folder philosophy
 
 ```
@@ -375,33 +442,43 @@ components/
   layout/       Container, Section, Header, Navigation, Footer, SkipToContent, Shell
   commerce/     ProductCard, ProductGrid, ProductFilters, ProductImage, ProductPricing,
                 ProductGallery, ProductMeta, ProductInfo, AddToCartButton, CartTable,
-                CartSummary, CartProvider (+ Skeleton loading states) — MiniCart,
-                checkout deferred, see docs/decisions.md, "Cart"
+                CartSummary, CartProvider (+ Skeleton loading states) — MiniCart still
+                deferred; CheckoutForm/CheckoutOrderSummary are colocated under
+                app/checkout/ instead, not here — single consumer, see docs/decisions.md,
+                "Checkout"
   music/        player, track list, waveform UI — created on first use
   marketing/    Hero, ShopByType — landing/promo sections
   common/       shared, feature-agnostic UI (e.g. Logo, Breadcrumbs)
 lib/
   apollo/       Apollo Client setup — client + provider (browser), rsc-client (server),
-                cart-client + session-link (cart, session-scoped), links
-  actions/      Server Actions — cart.actions.ts, the only caller of cart.service.ts's
-                mutating functions (feature/cart)
+                cart-client + session-link (cart/checkout, session-scoped), links
+  actions/      Server Actions — cart.actions.ts and checkout.actions.ts, the only
+                callers of cart.service.ts's/checkout.service.ts's mutating functions
   env.ts        typed environment access
   config/       centralized app configuration — store.ts, routes.ts, theme.ts
   format-money.ts  Money -> display string, shared by presentation mappers
+  parse-money.ts   the inverse — WooCommerce price string -> Money, shared by every
+                    mapper (product/cart/checkout)
   product-filters.ts  searchParams <-> ProductsQueryWhere translation, shared by
                        every Listing page (app/products, app/search, app/categories/[slug])
-  cart-session.ts  the httpOnly WooCommerce session-cookie helper (feature/cart)
+  cart-session.ts  the httpOnly WooCommerce session-cookie helper (feature/cart;
+                    feature/checkout added clearCartSessionToken)
+  checkout-validation.ts  required-field/email/country validation WooCommerce's own
+                          `checkout` mutation doesn't enforce — see docs/decisions.md,
+                          "Checkout"
 graphql/
-  queries/      GraphQL queries (e.g. site-info.ts, products.query.ts, product.query.ts, cart.query.ts)
-  mutations/    cart.mutations.ts (feature/cart) — the first file here
+  queries/      GraphQL queries (e.g. site-info.ts, products.query.ts, product.query.ts,
+                cart.query.ts, checkout.query.ts)
+  mutations/    cart.mutations.ts, checkout.mutations.ts
   fragments/    GraphQL fragments (e.g. product.fragment.ts)
 services/       the only callers of Apollo Client; UI's data contract
   mappers/      WooCommerce DTO -> domain type transformations
 hooks/          shared React hooks — use-cart.ts (feature/cart), the first file here
-types/          shared TypeScript types (e.g. MusicProduct, Cart)
-  dto/          types mirroring WPGraphQL responses (e.g. WooCommerceProductDto, WooCommerceCartDto)
-data/           static content (e.g. product-types.ts, sort-options.ts) — distinct from
-                lib/config — see component-principles.md
+types/          shared TypeScript types (e.g. MusicProduct, Cart, Order)
+  dto/          types mirroring WPGraphQL responses (e.g. WooCommerceProductDto,
+                WooCommerceCartDto, WooCommerceCheckoutPayloadDto)
+data/           static content (e.g. product-types.ts, sort-options.ts, countries.ts) —
+                distinct from lib/config — see component-principles.md
 ```
 
 The rule throughout: a folder is created when the first file that belongs

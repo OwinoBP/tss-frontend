@@ -46,6 +46,8 @@ export const routes = {
 
   cart: "/cart",
   checkout: "/checkout",
+  /** Query params (total/currency/status/paymentMethodTitle) are appended by the caller — see `lib/actions/checkout.actions.ts`, docs/decisions.md, "Checkout". */
+  checkoutSuccessPath: (orderNumber: string): string => `/checkout/success/${encodeURIComponent(orderNumber)}`,
 
   /** Future — gated behind `storeConfig.features.accounts` (lib/config/store.ts) until account pages exist. */
   account: "/account",

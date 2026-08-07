@@ -13,6 +13,22 @@ export interface Cart {
   total: Money;
   totalTax: Money;
   isEmpty: boolean;
+  /**
+   * Whether the store needs a shipping address to fulfill this cart's
+   * contents — reflects real shipping-zone/method configuration, not just
+   * "does this cart contain a physical product" (confirmed live: `false`
+   * with no shipping method configured for the cart's package, `true` once
+   * one exists — see docs/decisions.md, "Checkout"). `app/checkout` gates
+   * the shipping address section on this.
+   */
+  needsShippingAddress: boolean;
+  /**
+   * WooCommerce's own auto-selected shipping method rate ID(s) for this
+   * cart's package — passed straight through to the `checkout` mutation's
+   * `shippingMethod` input, not re-chosen by this app (no multi-rate
+   * picker yet, see docs/decisions.md, "Checkout").
+   */
+  chosenShippingMethods: string[];
 }
 
 /**

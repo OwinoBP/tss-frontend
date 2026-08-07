@@ -59,7 +59,16 @@ export async function getCart(sessionToken: string | null): Promise<CartResult> 
   if (!data?.cart) {
     const zero = { amount: 0, currency: storeConfig.currency.code };
     return {
-      cart: { items: [], itemCount: 0, subtotal: zero, total: zero, totalTax: zero, isEmpty: true },
+      cart: {
+        items: [],
+        itemCount: 0,
+        subtotal: zero,
+        total: zero,
+        totalTax: zero,
+        isEmpty: true,
+        needsShippingAddress: false,
+        chosenShippingMethods: [],
+      },
       sessionToken: resolveSessionToken(sessionToken, sessionOut),
     };
   }

@@ -1997,3 +1997,327 @@ confirmed the empty state also persisted across a second reload. The
 temporary product was deleted immediately after each verification pass
 and the store re-confirmed at zero products, the same discipline every
 prior branch's ADR already established.
+
+## Checkout: order placement, and a real Next.js 16 re-render behavior that reshaped the design
+
+`feature/checkout` Phase 1 scope: a billing address, a conditional
+shipping address, a payment-method choice, order submission, and a
+confirmation. Explicitly out of scope for this pass (confirmed
+unnecessary via live investigation, not just deferred by assumption):
+payment gateway integrations, account creation, saved addresses, coupons,
+order history, invoices, email templates, shipping calculators.
+
+### Pre-work: verifying every prior feature branch actually merged
+
+Per explicit instruction, before any implementation: confirmed
+`feature/checkout` branches from `develop` at the same commit that already
+contains Cart, Filtering & Sorting, Detail Pattern Hardening, Product
+Search, and Category Pages (`git merge-base feature/checkout develop`
+equals `develop`'s own tip; `git merge-base --is-ancestor develop
+feature/checkout` — yes). Every corresponding file (`app/cart`,
+`lib/product-filters.ts`, `components/common/DetailNotFound`, `app/search`,
+`app/categories`) confirmed present in the working tree, not just in
+commit messages. No missing-merge scenario existed for this branch.
+
+### WooCommerce capability investigation: confirmed live, not assumed
+
+Same introspection procedure as every prior branch (`wp eval
+'update_option("graphql_general_settings", ["public_introspection_enabled"
+=> "on"])'`, reverted via `delete_option` immediately after — done three
+separate times this branch, once per investigation pass, each reverted
+before moving on). Confirmed real: root mutation `checkout(input:
+CheckoutInput!): CheckoutPayload`. `CheckoutInput` fields: `account`
+(`CreateAccountInput`, unused — no account creation this pass), `billing`/
+`shipping` (`CustomerAddressInput`: `firstName`, `lastName`, `company`,
+`address1`, `address2`, `city`, `state`, `postcode`, `country`
+(`CountriesEnum`), `email`, `phone` — **none marked `NON_NULL` at the
+schema level**), `paymentMethod` (`String`), `shipToDifferentAddress`
+(`Boolean`), `shippingMethod` (`[String]`), `customerNote`, `fees`,
+`metaData`, `isPaid`, `transactionId`, `createdVia`, `clientMutationId`.
+`CheckoutPayload`: `result`, `redirect`, `order` (`Order`), `customer`,
+`notices` (`[CartNotice]`).
+
+`paymentGateways` (root query, `RootQueryToPaymentGatewayConnection`) and
+`Order`'s full field set (`billing`/`shipping`: `CustomerAddress` output
+type — same field names as the input type; `status`: `OrderStatusEnum`,
+8 values — `PENDING`/`PROCESSING`/`ON_HOLD`/`COMPLETED`/`CANCELLED`/
+`REFUNDED`/`FAILED`/`CHECKOUT_DRAFT`; `total`/`subtotal`/`shippingTotal`/
+`totalTax`/`discountTotal` as formatted strings, same convention as
+`Cart`) were confirmed the same way.
+
+### Guest checkout works; required-field validation on the mutation itself is far looser than assumed
+
+Verified with a real temporary product (`wp wc product create`) added to
+a real guest cart, then `checkout` called directly via `curl` before any
+app code existed — same discipline as the Cart branch's session spike.
+
+**`checkout(input: { paymentMethod: "cod" })` — no billing at all —
+returned `result: "success"` and created a real order** (`wc_get_order`
+confirmed: status `processing`, correct total, `customer_id` 0, every
+billing field genuinely empty). No login, no `account` input, needed.
+This directly contradicts the standard WooCommerce checkout *form*'s
+required-field enforcement — that enforcement lives in the classic
+checkout template/REST validation layer, which WPGraphQL for WooCommerce's
+`checkout` mutation does not reproduce. Two things it *does* validate:
+a malformed `billing.email` ("Invalid billing email address") and an
+out-of-`CountriesEnum` country (a GraphQL-level validation error, not a
+resolver error — `country` must come from a real enum value, not
+freeform text). An invalid/disabled `paymentMethod` string is rejected
+("Invalid payment method.").
+
+**Conclusion: this app's own required-field validation
+(`lib/checkout-validation.ts`) is load-bearing, not a defensive-redundant
+nicety.** Required: `firstName`, `lastName`, `address1`, `city`,
+`postcode`, `country` (billing and, when supplied, shipping); `email`
+required for billing only (WooCommerce has no real use for a shipping
+email). HTML5 `required`/`type="email"` on the form fields is a
+progressive-enhancement layer on top, confirmed genuinely redundant with
+this (not the only check) by testing with `form.noValidate = true` and a
+real Chrome session, both live-verified.
+
+### Payment methods: a real queried list, and a real gap found in this store's configuration
+
+`wp wc payment_gateway list` showed all three installed offline gateways
+(`bacs`, `cheque`, `cod`) with `enabled` blank — **this store currently
+has zero enabled payment methods**, confirmed both via `wp-cli` and via
+`{ paymentGateways { nodes { id title description } } }` returning the
+whole field as `null` (not an empty connection) with nothing enabled.
+`services/checkout.service.ts#getPaymentGateways` treats that as an empty
+list; `CheckoutForm` renders "No payment methods are currently available"
+and disables submission rather than assuming at least one gateway exists
+— this is the one piece of this pass genuinely blocked on store
+configuration, not app code. Flagged in Known Limitations. `cod` was
+enabled temporarily (`wp wc payment_gateway update cod --enabled=true`)
+for every live verification pass in this branch and reverted to disabled
+immediately after each one — the store's real configuration state was
+never left changed.
+
+### Shipping: conditional on real store configuration, confirmed both ways
+
+`Cart.needsShippingAddress` was `false` with this store's shipping fully
+unconfigured (its one zone, "Locations not covered by your other zones",
+had zero methods) — even though the temporary test product was a real
+physical (non-virtual, non-downloadable) product that `needs_shipping()`
+returns `true` for. Adding a temporary flat-rate method to that zone
+(`wp wc shipping_zone_method create 0 --method_id=flat_rate`, removed via
+`WC_Shipping_Zone::delete_shipping_method()` immediately after) flipped
+`needsShippingAddress` to `true` and populated `Cart.availableShippingMethods`
+(rates) / `Cart.chosenShippingMethods` (WooCommerce auto-selects the one
+available rate). **Conclusion: "does this app need a shipping form" isn't
+a static per-product-type question — it's `Cart.needsShippingAddress`,
+read live, per cart.** Two new additive `Cart` fields
+(`needsShippingAddress`, `chosenShippingMethods` — the latter filtered of
+nulls in `cart.mapper.ts`) carry this from `CART_FIELDS_FRAGMENT` through
+to `CheckoutForm`, the same kind of small justified additive change as
+`MusicProduct.databaseId`. `shippingMethod` is passed straight through
+from `cart.chosenShippingMethods` to the `checkout` mutation — no
+multi-rate picker UI this pass (see Future Enhancements); with only ever
+one method configured during verification, WooCommerce's own
+auto-selection made one unnecessary to prove the field wiring works.
+`state` (county/region) is collected as a plain optional free-text field,
+not a dynamic per-country cascading dropdown fed by the real
+`countryStates(country: ...)` query (confirmed live to exist and return
+real data, e.g. Kenya's 47 counties) — deliberately cut for this pass
+per "Avoid introducing new abstractions unless they materially improve
+the architecture," since `state` isn't schema-validated either way.
+
+### Coupons and taxes: confirmed automatic, no checkout-mutation involvement
+
+`Cart.appliedCoupons` carries through to `Order.couponLines` automatically
+— nothing in `CheckoutInput` concerns coupons at all, confirming they're
+correctly out of scope rather than a gap. This store has
+`woocommerce_calc_taxes` set to `no` (confirmed via `wp option get`),
+so every live-verified order had `totalTax: "$0.00"` — the schema still
+exposes `totalTax`/`taxLines` regardless, and `checkout.mapper.ts` parses
+them generically (same `parseMoney` as everything else), not hardcoded to
+zero.
+
+### Architecture: Order gets its own domain model; the checkout process composes Cart, not a new domain
+
+Two separate questions, both confirmed by the investigation above rather
+than decided a priori:
+
+**Should `Order` get its own domain model?** Yes — same DTO -> Mapper ->
+Domain pipeline as Product/Category/Cart
+(`types/dto/woocommerce-checkout.dto.ts` -> `services/mappers/checkout.mapper.ts`
+-> `types/order.ts`). `Order` carries billing/shipping addresses, an order
+number, a status, and a payment method — none of which `Cart` has a
+place for — so force-fitting checkout's result into `Cart` would have
+been the higher-complexity path, not the lower one. This is the same
+reasoning that already gave Product and Category their own domain models
+instead of a shared "WooCommerce resource" type.
+
+**Should the checkout *process* be a new domain, or compose Cart?**
+Compose Cart. `app/checkout/page.tsx`'s order summary reads the live cart
+via the exact same `getCart` `/cart` already calls — no second "checkout
+cart" concept, no duplicated item-summary logic beyond the one genuinely
+different requirement (read-only, no quantity controls — `CheckoutOrderSummary`
+is a new small component for that, not a reuse of `CartTable`, which is
+quantity-editable and `useCart()`-coupled in a way that makes no sense
+here). Session handling reuses `cart-client.ts`/`session-link.ts`
+directly — `checkout` needs the identical `woocommerce-session` round
+trip as every cart mutation, confirmed live, so a third Apollo client
+would have added complexity without a real reason. `services/checkout.service.ts`
+follows `cart.service.ts`'s exact shape (framework-agnostic, explicit
+`sessionToken` in/out) for the same reason `product.service.ts` and
+`category.service.ts` already share a shape: consistency lowers the cost
+of the next resource-scoped service more than any resource-specific
+abstraction would.
+
+`CheckoutForm` is colocated under `app/checkout/`, not promoted to
+`components/commerce/` — single consumer, single route segment, the same
+"two consumers, one route segment stays colocated" precedent `SearchForm`
+established (`components/commerce/` folder philosophy previously flagged
+"checkout" as an anticipated future member of that folder; verifying
+against the actual single-consumer situation superseded that placeholder
+note rather than confirming it).
+
+### A confirmed Next.js 16 behavior discovered live, and the redesign it forced
+
+The first implementation held the completed `Order` in a parent Client
+Component's `useState` (`CheckoutPageContent`), swapping the form for an
+inline `CheckoutSuccess` view on success — deliberately chosen at design
+time specifically to avoid a second GraphQL round trip that would have
+re-exposed the `order.id` bug and a guest-order re-query authorization
+issue (both below). Verified against a real browser (Claude in Chrome,
+not just service-level checks): the order was created correctly in
+WooCommerce every time, but the page visibly reset to the plain
+empty-cart state instead of ever showing the success view.
+
+Root cause, found by reading `node_modules/next/dist/docs/01-app/02-guides/server-actions.md`
+directly per this project's standing instruction to check this version's
+actual docs rather than trained-on assumptions (a materially different
+Next.js, per AGENTS.md) — not by guessing: **"Mutates cookies through
+`cookies()`. Setting or deleting a cookie automatically re-renders the
+current page so the UI reflects the new value,"** and that re-render is
+bundled into the *same* action response as the action's return value.
+`submitCheckoutAction` calls `clearCartSessionToken()` (`cookies().delete()`)
+after a successful order — necessary, since checkout also confirmed live
+to never rotate the session token (see below) — which triggers exactly
+this automatic re-render. `app/checkout/page.tsx` re-runs server-side
+inside that same response, sees the cart is now genuinely empty, and
+takes its empty-cart branch — replacing `CheckoutPageContent`'s entire
+subtree (including its `useState`) before the client ever gets to render
+an inline success view from it. This is real, current-Next.js-version
+behavior, not a bug in the app code that held the state.
+
+**Fix: `submitCheckoutAction` calls `redirect()` to
+`/checkout/success/[orderNumber]` on success instead of returning a value
+for a client component to hold.** `redirect()` is the framework's own
+documented escape from this exact situation ("Calls `redirect()`. The
+response navigates the router and streams the destination's RSC
+Payload."). Confirmation data (`total`/`currency`/`status`/
+`paymentMethodTitle`) travels as query params, taken from the mutation's
+response already in hand inside the action — no second GraphQL call, so
+the `order.id` bug and the guest re-query authorization issue stay
+avoided exactly as the original design intended, just via a different
+mechanism. `redirect()` is called *after* the try/catch that wraps the
+mutation, never inside it — `redirect()` works by throwing a
+framework-internal signal that a generic `catch (error)` would otherwise
+misreport as a failed checkout, a classic App Router pitfall avoided by
+structuring the function this way rather than by a special-case catch.
+This redesign is also a net simplification: `CheckoutActionResult` no
+longer needs an `{ ok: true }` variant, `CheckoutForm` no longer needs an
+`onSuccess` callback prop, and `CheckoutPageContent` — once stateless —
+was removed entirely, its JSX folded directly into `page.tsx`.
+
+### `order.id` is never requested — a second, independently confirmed live bug
+
+Isolated by requesting *only* `order { id }` inside `checkout` for a
+guest order (`customer_id` 0): reproducible "Internal server error" every
+time, while `databaseId`/`orderNumber`/every other scalar field resolved
+correctly in the same call. `graphql/mutations/checkout.mutations.ts`
+requests `databaseId`/`orderNumber` and never `id` — the same
+`databaseId`-for-mutations, `id`-is-opaque precedent
+`MusicProduct.databaseId` already established for `addToCart`. (A
+separate, unexplored question: whether `order.id` resolves correctly for
+an *authenticated customer's* order — out of scope, since this pass is
+guest-checkout-only and no account creation exists yet.)
+
+### Checkout never rotates the session token — confirmed live, not assumed from Cart's pattern
+
+Unlike every cart mutation, a successful `checkout` call's HTTP response
+carries **no** `woocommerce-session` header at all (confirmed via `curl
+-D` capturing response headers directly) — the guest session it just
+consumed is gone, not reissued. Reusing that same token afterward on any
+further cart-touching request fails with "Sorry, no session found."
+`checkout.service.ts#submitCheckout` returns `sessionToken: null`
+unconditionally (typed `string | null`, not simply omitted, so a future
+WooGraphQL version that starts rotating a token needs no shape change
+here); `submitCheckoutAction` calls `clearCartSessionToken()`
+(`lib/cart-session.ts`, new alongside `getCartSessionToken`/
+`setCartSessionToken`) rather than writing back the dead token, so the
+next `getCart()` call starts a genuinely fresh guest session instead of
+sending one WooCommerce will reject.
+
+### `lib/parse-money.ts`: extracted on the third real duplication
+
+`checkout.mapper.ts` needed the exact same `WooCommerce price string ->
+Money` parse already privately duplicated between `product.mapper.ts` and
+`cart.mapper.ts`. Extracted to `lib/parse-money.ts` (mirroring
+`lib/format-money.ts`'s existing location/naming), both prior mappers
+updated to import it — the same "extract once a second real duplication
+appears" precedent that already produced `lib/format-money.ts` and
+`data/product-types.ts` (see "Two more real duplications, extracted
+rather than copy-pasted").
+
+### `data/countries.ts`: pulled from WooCommerce's own data, not hand-typed
+
+WPGraphQL's `CountriesEnum` (250 values, confirmed via introspection) has
+no display-name field anywhere in the schema — a `countries`/
+`allowedCountries` root query returns only the bare code list. Rather
+than hand-type 250 ISO country names (real error risk for a real feature,
+not a place to guess), pulled the authoritative code -> name map directly
+from this store's own `WC()->countries->get_countries()` via `wp eval`
+— the same source WooCommerce itself uses — decoded its HTML entities
+(e.g. `Cura&ccedil;ao` -> `Curaçao`) via Python's `html.unescape`, and
+confirmed the count matches the live enum exactly (250/250). Static
+reference data, so it lives in `data/`, not `lib/config` (see
+docs/component-principles.md).
+
+### Verified end-to-end against the live backend, through a real browser, not just service-level checks
+
+Claude in Chrome (not `curl`/service-level calls alone) driving a real
+`next dev` server, using a temporary product (`wp wc product create`),
+`cod` temporarily enabled, and a temporary flat-rate shipping method
+(each reverted immediately after): visited the product page, clicked the
+real "Add to Cart" button, navigated to `/checkout`, confirmed the order
+summary matched the cart, filled billing, checked "ship to a different
+address" and confirmed the shipping fieldset appeared with its own
+`requireEmail: false` field set, submitted, and confirmed a real
+`302`-equivalent client-side redirect to `/checkout/success/[orderNumber]`
+rendering the correct order number/status/payment method/total —
+cross-checked directly against `wc_get_order()` in the backend, which
+matched exactly (billing name/email/address, total, payment method).
+Separately verified the validation path: disabled the form's native HTML5
+validation (`form.noValidate = true`) via the browser's own devtools
+protocol and submitted a fully empty form, confirming
+`lib/checkout-validation.ts`'s server-side errors render correctly
+per-field ("Required.") plus a top-level summary banner — the real,
+load-bearing check, not the HTML5 layer alone. Every temporary product,
+order, shipping method, and payment-gateway-enabled state was removed/
+reverted immediately after, and the store re-confirmed at zero orders and
+zero products at the end of the branch, the same discipline every prior
+branch's ADR established.
+
+### Deliberately deferred: multi-rate shipping picker, dynamic state/county dropdown, MiniCart/order-count badge
+
+A shipping-method *picker* (choosing among multiple `Cart.availableShippingMethods`
+rates) wasn't buildable against a store with only ever one method
+configured during verification — `shippingMethod` passes `cart.chosenShippingMethods`
+straight through today; revisit once a real multi-method store exists to
+verify against. A dynamic per-country `state`/county dropdown fed by the
+live `countryStates` query was cut per the scope note above — `state`
+stays free text. MiniCart/`cart_count` remain deferred from the Cart
+branch, unaffected by this one.
+
+### Future Enhancements
+
+Multi-rate shipping method selection UI; dynamic `countryStates`-backed
+state/county dropdown; `customerNote` field (schema-supported, not
+collected this pass); enabling at least one payment gateway in WooCommerce
+admin (a store-configuration task, not app code) so checkout is actually
+completable in a non-development environment; payment gateway
+integrations (Stripe/PayPal/etc. — explicitly out of scope, offline
+gateways only this pass); saved addresses and account creation, once
+account pages exist; order history/invoices, coupons UI at checkout.

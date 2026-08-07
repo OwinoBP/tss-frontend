@@ -14,6 +14,10 @@ export interface WooCommerceCartDto {
   subtotal: string | null;
   total: string | null;
   totalTax: string | null;
+  /** Confirmed live: only `true` once the store has an enabled shipping method the cart's contents actually need — see docs/decisions.md, "Checkout". */
+  needsShippingAddress: boolean;
+  /** WooCommerce auto-selects a method once exactly one is available for the cart's package — confirmed live, see docs/decisions.md, "Checkout". */
+  chosenShippingMethods: (string | null)[] | null;
 }
 
 export interface WooCommerceCartItemConnectionDto {

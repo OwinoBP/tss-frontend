@@ -36,3 +36,17 @@ export async function setCartSessionToken(token: string): Promise<void> {
     maxAge: 60 * 60 * 48,
   });
 }
+
+/**
+ * Called after a successful checkout — confirmed live that the `checkout`
+ * mutation never returns a fresh `woocommerce-session` header, because the
+ * guest session it consumed is gone, not rotated (see docs/decisions.md,
+ * "Checkout"). Clearing the cookie here, rather than leaving the now-dead
+ * token in place, means the next `getCart()` call (e.g. `Header`, or a
+ * future visit to `/cart`) starts a brand-new guest session instead of
+ * sending a token WooCommerce will reject.
+ */
+export async function clearCartSessionToken(): Promise<void> {
+  const store = await cookies();
+  store.delete(CART_SESSION_COOKIE);
+}

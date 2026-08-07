@@ -4,6 +4,7 @@ import type {
   WooCommerceCartItemDto,
 } from "@/types/dto/woocommerce-cart.dto";
 import { storeConfig } from "@/lib/config";
+import { parseMoney } from "@/lib/parse-money";
 
 // Cart mapper
 //
@@ -17,16 +18,18 @@ export function mapWooCommerceCart(dto: WooCommerceCartDto): Cart {
   return {
     items: dto.contents.nodes.map(mapCartItem),
     itemCount: dto.contents.itemCount,
-    subtotal: parseMoney(dto.subtotal),
-    total: parseMoney(dto.total),
-    totalTax: parseMoney(dto.totalTax),
+    subtotal: parseMoney(dto.subtotal, FALLBACK_CURRENCY),
+    total: parseMoney(dto.total, FALLBACK_CURRENCY),
+    totalTax: parseMoney(dto.totalTax, FALLBACK_CURRENCY),
     isEmpty: dto.isEmpty,
+    needsShippingAddress: dto.needsShippingAddress,
+    chosenShippingMethods: (dto.chosenShippingMethods ?? []).filter((method): method is string => Boolean(method)),
   };
 }
 
 function mapCartItem(item: WooCommerceCartItemDto): CartLineItem {
   const product = item.product?.node ?? null;
-  const lineSubtotal = parseMoney(item.total);
+  const lineSubtotal = parseMoney(item.total, FALLBACK_CURRENCY);
 
   return {
     key: item.key,
@@ -47,14 +50,5 @@ function mapCartItem(item: WooCommerceCartItemDto): CartLineItem {
       currency: FALLBACK_CURRENCY,
     },
     lineSubtotal,
-  };
-}
-
-/** Same defensive strip as product.mapper.ts's parseMoney — WooCommerce cart totals are formatted strings too. */
-function parseMoney(raw: string | null) {
-  const amount = raw ? Number(raw.replace(/[^0-9.-]/g, "")) : 0;
-  return {
-    amount: Number.isFinite(amount) ? amount : 0,
-    currency: FALLBACK_CURRENCY,
   };
 }
