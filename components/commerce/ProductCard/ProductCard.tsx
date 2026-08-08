@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProductImage } from "@/components/commerce/ProductImage";
 import { ProductPricing } from "@/components/commerce/ProductPricing";
@@ -15,7 +16,9 @@ import type { ProductCardProps } from "./ProductCard.types";
  * Matches docs/design-system.md's "Product card anatomy": 1:1 artwork
  * (via ProductImage — placeholder handling lives there, not here), title/
  * producer/type stacked tight, price (via ProductPricing) set apart with
- * a slightly larger gap, subtle hover-only artwork scale.
+ * a slightly larger gap, subtle hover-only artwork scale, a sale badge as
+ * an artwork-corner overlay, and a resting/hover shadow on the card itself
+ * (see docs/decisions.md, "Product card: sale badge and hover elevation").
  */
 export function ProductCard({
   href,
@@ -30,12 +33,19 @@ export function ProductCard({
       href={href}
       className="group block overflow-hidden rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
     >
-      <Card className="gap-4 overflow-hidden py-0">
-        <ProductImage
-          artwork={artwork}
-          sizes="(min-width: 1536px) 20vw, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, 100vw"
-          className="transition-transform duration-200 ease-out group-hover:scale-[1.03]"
-        />
+      <Card className="gap-4 overflow-hidden py-0 shadow-(--elevation-md) transition-shadow duration-200 ease-out group-hover:shadow-lg">
+        <div className="relative">
+          <ProductImage
+            artwork={artwork}
+            sizes="(min-width: 1536px) 20vw, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, 100vw"
+            className="transition-transform duration-200 ease-out group-hover:scale-[1.03]"
+          />
+          {price.salePrice ? (
+            <Badge aria-hidden="true" className="absolute top-2 right-2">
+              Sale
+            </Badge>
+          ) : null}
+        </div>
 
         <CardContent className="flex flex-col pb-4">
           <div className="flex flex-col gap-1">

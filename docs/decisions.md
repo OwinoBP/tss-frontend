@@ -2424,3 +2424,106 @@ changed — confirmed via `git diff` before considering the branch
 complete, matching this branch's core invariant: components change in
 appearance only because a semantic token now resolves to a different
 value, never because a component was edited.
+
+## Product card: sale badge and hover elevation
+
+`feature/ui-product-grid` is the first restyle branch consuming the
+tokens `feature/ui-tokens` shipped. Governing plan:
+`docs/plans/ui-product-grid-plan.md`. **Decision: fill in the one
+deliberately-deferred piece of `ProductCard`'s existing spec (a sale
+badge) and add a card-level hover elevation, using only already-existing
+primitives and tokens — no new component, no new mapper field, no
+`app/globals.css` change.** Actual values live in `docs/design-system.md`
+("Product card anatomy," "Shadow system"), not restated here.
+
+### Scope was narrower than the branch's task description implied
+
+A line-by-line audit against `design-system.md`'s Product Card Anatomy
+table found the evaluation list almost entirely already spec-compliant —
+imagery, typography, spacing, and `ProductGrid`'s responsive columns all
+already matched documented values exactly. The two real gaps were a sale
+badge (already documented as deferred) and a card-level hover shadow
+(only the artwork scaled, not the card itself). Everything else was
+confirmed compliant and left untouched, rather than restyled anyway for
+the sake of "using" the branch.
+
+### The obvious accent-color move was checked against real data and rejected
+
+`design-system.md` lists sale-price emphasis as "Text Primary **or
+Accent**," which made recoloring `ProductPricing`'s sale price to
+`text-primary` look like an in-scope, obvious win. Checked against the
+actual contrast pairings `feature/ui-tokens` verified, not assumed safe by
+extension: `--primary` was only verified as a filled background with
+`--primary-foreground` text on top, never as bare text on `--background`/
+`--card` — and as bare text it fails WCAG AA outright in light theme.
+**`ProductPricing.tsx` was left untouched.** The accent-token objective is
+fully met by the sale badge instead (`Badge`'s `default` variant is
+exactly the filled pairing that *is* verified) — this is the more
+conservative, lower-complexity choice, not a missed opportunity.
+
+### Badge placement and accessibility
+
+Corner overlay on the artwork, not inline above the title —
+`design-system.md` had left this an explicit open choice ("pick one
+placement and use it everywhere, don't mix"); this branch closes it. The
+badge is composed via a `relative` wrapper added locally in
+`ProductCard.tsx` around the existing `ProductImage` usage, rather than a
+new prop on `ProductImage` itself — `ProductImage` is shared with
+`ProductGallery` on the product detail page, out of scope for this
+branch, so its API stays untouched. The badge is `aria-hidden`:
+`ProductPricing`'s visible regular/sale price pair already communicates
+the sale state accessibly; a screen reader announcing "Sale" on top of
+that would be redundant, not additive.
+
+### Two scope corrections made during architecture review, not during implementation
+
+Two items were resolved as explicit in/out decisions before any code was
+written, rather than assumed either way mid-implementation:
+
+- **`ProductFilters`** — the governing roadmap (`docs/plans/ui-architecture-review.md`)
+  had originally bundled a `ProductFilters` restyle into this same
+  branch. Confirmed it's a separate UI concern (a form/toolbar, not the
+  card/grid primitive this branch is scoped around) and left it out; the
+  roadmap itself was corrected to list it as its own branch,
+  `feature/ui-product-filters`, rather than left inconsistent with this
+  branch's actual scope.
+- **`ProductPricing`'s missing semantic markup** — audit found a real,
+  pre-existing WCAG gap (`ProductPricing`'s regular price is a plain
+  `<span>` with a CSS strikethrough, not a semantic `<del>`/`<s>` element
+  or an `aria-label` distinguishing "was" from "now"). Real, but adjacent:
+  `ProductPricing.tsx` is shared with the out-of-scope Product Detail
+  page. Left unfixed here and recorded as a follow-up for
+  `feature/ui-product-detail` in the roadmap, rather than either silently
+  fixing a shared file outside this branch's stated scope or silently
+  dropping a real defect found during the audit.
+
+### `prefers-reduced-motion`: matched to existing behavior, not newly invented
+
+Checked directly rather than assumed: this codebase has no
+`prefers-reduced-motion` handling anywhere yet, including on the
+pre-existing artwork-scale hover transition. The new shadow transition
+was left in the same state — deliberately, so this branch doesn't
+introduce a new, inconsistent motion-handling precedent for just one of
+two hover effects on the same component. Adding real
+`prefers-reduced-motion` support project-wide is a `feature/ui-polish`
+concern (already on the roadmap), not something to partially solve here.
+
+### Verification
+
+`tsc --noEmit`, `eslint`, and `next build` all pass cleanly; `next build`
+also confirms `/products`, `/categories/[slug]`, and `/search` — every
+route rendering through `ProductGrid`/`ProductCard` — build without
+error. Structurally verified against the existing `app/dev/product-grid`
+fixture page (already covers on-sale and non-sale products, no backend
+needed): exactly the expected two of eight fixtures render a badge (the
+`index % 3 === 0` fixtures), each with the verified `bg-primary`/
+`text-primary-foreground` pairing and `absolute top-2 right-2`
+placement; every loaded card carries the resting shadow and the
+hover-to-`shadow-lg` transition; `ProductCardSkeleton` carries the
+matching resting shadow with no hover class. No real-browser visual/
+dark-mode pass was performed for this branch — no browser-automation
+connector was available in this session, unlike `feature/ui-tokens`'
+verification — flagged here rather than claimed. `git diff --name-only`
+confirms `services/`, `graphql/`, `types/`, `lib/apollo/`, and every
+`app/**/page.tsx` route are untouched; the only `.ts`/`.tsx` files
+changed are `ProductCard.tsx` and `ProductCardSkeleton.tsx`.

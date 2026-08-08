@@ -316,19 +316,21 @@ decoration.
 | Token | Value (light mode) | Usage | Status |
 |---|---|---|---|
 | `shadow-sm` | `0 1px 2px rgb(0 0 0 / 0.04)` | Inputs, small controls — barely-there separation | CSS variable exists (`app/globals.css`); no consumer yet, so not yet registered as a Tailwind utility |
-| `shadow-md` | `0 2px 8px rgb(0 0 0 / 0.06)` | Resting card elevation | Same as above |
-| `shadow-lg` | `0 8px 24px rgb(0 0 0 / 0.08)` | Hover elevation, dropdowns, popovers | **Exists as a real Tailwind utility** — `SkipToContent`'s `focus:shadow-lg` is a genuine existing consumer, so this one was registered in `@theme inline` rather than left as a bare variable |
+| `shadow-md` | `0 2px 8px rgb(0 0 0 / 0.06)` | Resting card elevation | CSS variable exists; consumed via arbitrary-value syntax (`shadow-(--elevation-md)`) by `ProductCard`/`ProductCardSkeleton` (`feature/ui-product-grid`) — not yet registered as a Tailwind utility, since the arbitrary-value form serves both consumers with no duplication cost |
+| `shadow-lg` | `0 8px 24px rgb(0 0 0 / 0.08)` | Hover elevation, dropdowns, popovers | **Exists as a real Tailwind utility** — `SkipToContent`'s `focus:shadow-lg` was its original consumer; `ProductCard`'s `group-hover:shadow-lg` (`feature/ui-product-grid`) is a second |
 | `shadow-xl` | `0 16px 48px rgb(0 0 0 / 0.12)` | Modals, dialogs | CSS variable exists; no consumer yet |
 
 Following this project's standing "extract on real use" precedent (see
 `docs/decisions.md`): the underlying CSS custom properties for all four
 tokens were implemented in `feature/ui-tokens` (both themes), but only
 `shadow-lg` was promoted to a registered Tailwind utility, since it's the
-only one an existing component actually needs. `shadow-sm`/`shadow-md`/
-`shadow-xl` are available today via `shadow-[var(--elevation-sm)]`-style
-arbitrary-value syntax if a real need appears before their own dedicated
-branch; otherwise, promote each into `@theme inline` the same way
-`shadow-lg` was, the first time a real consumer needs it.
+only one an existing component actually needs. `shadow-sm`/`shadow-xl`
+remain available via `shadow-(--elevation-sm)`-style arbitrary-value
+syntax (the project's real convention — see `components/ui/card.tsx`'s
+`py-(--card-spacing)` — not the bracket `shadow-[var(--x)]` form shown in
+an earlier draft of this table) if a real need appears before their own
+dedicated branch; otherwise, promote each into `@theme inline` the same
+way `shadow-lg` was, the first time a real consumer needs it.
 
 **Dark mode:** shadows read poorly on dark backgrounds (they mostly
 disappear or look muddy). Values are roughly half the light-mode opacity,
@@ -464,16 +466,15 @@ smaller version of the same layout.
 
 ## Product card anatomy
 
-Implemented in `components/commerce/ProductCard` (`feature/product-card`).
+Implemented in `components/commerce/ProductCard` (`feature/product-card`;
+Badges and card-level hover elevation added in `feature/ui-product-grid`).
 Every element below maps to a real `MusicProduct` field
 (`types/music-product.ts`), reshaped by `product-card.mapper.ts` into the
 `ProductCardProps` the component actually renders — see
 [architecture.md](architecture.md) and [decisions.md](decisions.md) for
 that mapping layer and the handful of judgment calls made while
 implementing this spec (Product type as Caption-style text rather than a
-`Badge`, since only `Badges` below is documented as pill-shaped; the
-Badges row itself unused for now since nothing in this pass needed
-`featured`/sale flags).
+`Badge`, since only `Badges` below is documented as pill-shaped).
 
 | Element | Source field | Notes |
 |---|---|---|
@@ -482,8 +483,8 @@ Badges row itself unused for now since nothing in this pass needed
 | Producer | `producer.name` | Secondary text, directly beneath title, Text Secondary color, Body Small size. |
 | Product type | `productType` | Tertiary metadata — Caption style, often paired with other short specs (e.g. "DRUM KIT"). Note: currently mapped to a placeholder value for every product until a real WooCommerce source exists (see `docs/api/product-query.md`) — the card design shouldn't assume this is reliably differentiated data yet. |
 | Pricing | `regularPrice`, `salePrice` | Geist Mono for the numerals (see Typography). When `salePrice` is present, show both: regular price de-emphasized (Text Secondary, often strikethrough), sale price emphasized (Text Primary or Accent). |
-| Badges | Derived — `featured`, `salePrice !== null` | Small pill using the existing `Badge` component (`components/ui/badge.tsx`) rather than a new pattern. Placed on the artwork's corner (overlay) or inline above the title — pick one placement and use it everywhere, don't mix. |
-| Hover behaviour | — | Subtle only: artwork scale to ~1.02–1.05, or a restrained overlay (e.g. a preview/play affordance, relevant once `previewUrl` is used). Title/price never move on hover. Timing per Motion Principles (150–200ms, ease-out). Must have a touch-equivalent — hover-only affordances are invisible on mobile. |
+| Badges | Derived — `salePrice !== null` | `Badge`'s `default` variant (`bg-primary`/`text-primary-foreground` — the pairing verified in `feature/ui-tokens`), placed as an **artwork-corner overlay** (`absolute top-2 right-2` inside a `relative` wrapper around `ProductImage`, not inside `ProductImage` itself — keeps `ProductImage.tsx`'s API untouched, since it's shared with `ProductGallery`). Corner overlay was chosen over inline-above-title because it reads as part of the artwork ("artwork-first"), not a new chrome row in the text block — implemented in `feature/ui-product-grid`, this placement is now the fixed convention, not an open choice. `aria-hidden`: the sale state is already communicated accessibly via `ProductPricing`'s regular/sale price pair, so the badge doesn't need its own announcement. A `featured` badge remains unimplemented — `MusicProduct.featured` isn't mapped into `ProductCardProps` yet; deferred, not built ahead of a real need. |
+| Hover behaviour | — | Artwork scale to ~1.02–1.05 (implemented: `scale-[1.03]`), **plus a card-level shadow lift** (`shadow-(--elevation-md)` resting → `shadow-lg` on hover, `feature/ui-product-grid`) — the shadow scale's second and third real Tailwind-utility consumers respectively, after `SkipToContent`. Title/price never move on hover. Timing per Motion Principles (150–200ms, ease-out; implemented at 200ms). Must have a touch-equivalent — hover-only affordances are invisible on mobile; this project has no `prefers-reduced-motion` handling anywhere yet (verified, not assumed, while implementing this), so the shadow transition intentionally matches the existing artwork-scale transition's behavior rather than introducing a new, inconsistent precedent for just one of the two. |
 | Spacing | Spacing Scale | Card internal padding: `md` (16px). Gap between artwork and metadata block: `md` (16px). Gap between stacked metadata lines (title/producer/type): `2xs`–`xs` (4–8px) — tight, since these are one related group. Gap before price: `sm` (12px) — a slightly bigger gap signals "price is a distinct piece of information," not part of the descriptive stack above it. |
 | Image ratio | — | **1:1 (square).** Matches the convention of album art and sample-pack cover art; keeps grids visually regular regardless of source image proportions. Artwork is `object-fit: cover`, never stretched. |
 
