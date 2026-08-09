@@ -173,7 +173,7 @@ mechanism rather than inventing a parallel one.
 | **Surface Overlay** | Floating surfaces — popovers, dropdowns, tooltips. | `--popover` | Exists |
 | **Text Primary** | Default text color — headings, body, anything that should be fully legible. | `--foreground` | Exists |
 | **Text Secondary** | De-emphasized text — metadata, captions, helper text. Never used for anything that must be read; only for things that support the primary text. | `--muted-foreground` | Exists |
-| **Accent** | The one interactive/brand color. Primary CTAs, active states, links, the sale-price emphasis. Used sparingly — see below. | `--primary` | Exists — implemented `feature/ui-tokens` |
+| **Accent** | The one interactive/brand color. Primary CTAs, active states, links. Used sparingly — see below. | `--primary` | Exists — implemented `feature/ui-tokens` |
 | **Accent Foreground** | Text/icon color on top of an Accent-colored surface. | `--primary-foreground` | Exists — re-verified `feature/ui-tokens` (see below) |
 | **Secondary Action** | Lower-emphasis interactive surfaces — secondary buttons, selected filter chips. | `--secondary` | Exists |
 | **Muted Fill** | Subtle background fills — disabled states, skeleton loaders, hover backgrounds on ghost elements. | `--muted` | Exists |
@@ -196,6 +196,18 @@ analog audio gear (brass, vinyl) without being loud, and was chosen to
 still work once real product photography is in view — "artwork-first"
 means the accent must not compete with whatever color the catalog's
 imagery happens to be.
+
+**Sale indicator vs. sale-price text — not the same use, only one is safe.**
+"Sale indicator" above means a filled surface (`ProductCard`'s sale
+badge: `bg-primary`/`text-primary-foreground`, the pairing verified safe
+in `feature/ui-tokens`) — it does **not** mean the sale price's own text
+color. `--primary` used as bare text directly on `--background`/`--card`
+was checked and found to fail WCAG AA (`feature/ui-product-grid`,
+confirmed again as still correct in `feature/ui-product-detail`); the
+emphasized sale price in `ProductPricing` stays `text-foreground`. A
+token being accessible as a filled background does not make it accessible
+as text — verify the specific pairing, don't assume one implies the
+other.
 
 **Naming note:** shadcn's scaffold separately defines `--accent`/
 `--accent-foreground` (a near-white hover-tint role, currently unused by
@@ -482,7 +494,7 @@ implementing this spec (Product type as Caption-style text rather than a
 | Title | `title` | Primary text — H4 weight/size (see Typography), one or two lines max, truncates rather than wraps past that. |
 | Producer | `producer.name` | Secondary text, directly beneath title, Text Secondary color, Body Small size. |
 | Product type | `productType` | Tertiary metadata — Caption style, often paired with other short specs (e.g. "DRUM KIT"). Note: currently mapped to a placeholder value for every product until a real WooCommerce source exists (see `docs/api/product-query.md`) — the card design shouldn't assume this is reliably differentiated data yet. |
-| Pricing | `regularPrice`, `salePrice` | Geist Mono for the numerals (see Typography). When `salePrice` is present, show both: regular price de-emphasized (Text Secondary, often strikethrough), sale price emphasized (Text Primary or Accent). |
+| Pricing | `regularPrice`, `salePrice` | Geist Mono for the numerals (see Typography). When `salePrice` is present, show both: regular price de-emphasized (Text Secondary, semantic `<del>`, `feature/ui-product-detail`), sale price emphasized (Text Primary — not Accent; `--primary` fails contrast as bare text, see the Colour System's Accent note above). |
 | Badges | Derived — `salePrice !== null` | `Badge`'s `default` variant (`bg-primary`/`text-primary-foreground` — the pairing verified in `feature/ui-tokens`), placed as an **artwork-corner overlay** (`absolute top-2 right-2` inside a `relative` wrapper around `ProductImage`, not inside `ProductImage` itself — keeps `ProductImage.tsx`'s API untouched, since it's shared with `ProductGallery`). Corner overlay was chosen over inline-above-title because it reads as part of the artwork ("artwork-first"), not a new chrome row in the text block — implemented in `feature/ui-product-grid`, this placement is now the fixed convention, not an open choice. `aria-hidden`: the sale state is already communicated accessibly via `ProductPricing`'s regular/sale price pair, so the badge doesn't need its own announcement. A `featured` badge remains unimplemented — `MusicProduct.featured` isn't mapped into `ProductCardProps` yet; deferred, not built ahead of a real need. |
 | Hover behaviour | — | Artwork scale to ~1.02–1.05 (implemented: `scale-[1.03]`), **plus a card-level shadow lift** (`shadow-(--elevation-md)` resting → `shadow-lg` on hover, `feature/ui-product-grid`) — the shadow scale's second and third real Tailwind-utility consumers respectively, after `SkipToContent`. Title/price never move on hover. Timing per Motion Principles (150–200ms, ease-out; implemented at 200ms). Must have a touch-equivalent — hover-only affordances are invisible on mobile; this project has no `prefers-reduced-motion` handling anywhere yet (verified, not assumed, while implementing this), so the shadow transition intentionally matches the existing artwork-scale transition's behavior rather than introducing a new, inconsistent precedent for just one of the two. |
 | Spacing | Spacing Scale | Card internal padding: `md` (16px). Gap between artwork and metadata block: `md` (16px). Gap between stacked metadata lines (title/producer/type): `2xs`–`xs` (4–8px) — tight, since these are one related group. Gap before price: `sm` (12px) — a slightly bigger gap signals "price is a distinct piece of information," not part of the descriptive stack above it. |
@@ -493,20 +505,21 @@ implementing this spec (Product type as Caption-style text rather than a
 ## Product detail anatomy
 
 Implemented in `app/products/[slug]` + `components/commerce/ProductGallery`,
-`ProductInfo`, `ProductMeta` (`feature/product-detail`). A richer view of
-the same `MusicProduct` `ProductCard` summarizes — same restraint, same
+`ProductInfo`, `ProductMeta` (`feature/product-detail`; presentation
+corrections in `feature/ui-product-detail`). A richer view of the same
+`MusicProduct` `ProductCard` summarizes — same restraint, same
 artwork-first priority, more room to show it.
 
 | Element | Source | Notes |
 |---|---|---|
-| Gallery | `artwork`, `gallery` | Primary image large, 1:1 (same Image Ratio rule as the card); additional `gallery` images shown as a smaller static row beneath. No click-to-swap/lightbox yet — see docs/decisions.md for why that's deferred rather than built against no real multi-image data to validate it. |
+| Gallery | `artwork`, `gallery` | Primary image large, 1:1 (same Image Ratio rule as the card); additional `gallery` images shown as a smaller static row beneath, marked up as a semantic `<ul>/<li>` list (`feature/ui-product-detail` — matches `ProductGrid`'s existing convention for a repeated collection of items; no visual change). No click-to-swap/lightbox yet — see docs/decisions.md for why that's deferred rather than built against no real multi-image data to validate it. |
 | Title | `title` | A semantic `<h1>` (one per page) but sized like **H4**, not Display/H1 — this is the one explicit typographic exception the Typography table already calls out ("product title in a detail view"), so artwork stays the visual focal point even on the page most about a single product. |
-| Price | `regularPrice`, `salePrice` | Same regular/sale treatment as the card (Geist Mono, strikethrough + emphasis), rendered larger (`ProductPricing`'s `lg` size) since there's room and it's a primary decision point here, not secondary metadata. |
-| Add to Cart | — (`AddToCartButton`, `feature/cart`) | Directly below `ProductInfo`, in the same info column — the page's one primary CTA (Button hierarchy's `default` variant, "at most one per view"). Adds a fixed quantity of 1; no quantity picker on this page for v1 — quantity is adjusted from `/cart` instead. |
+| Price | `regularPrice`, `salePrice` | Same regular/sale treatment as the card (Geist Mono, strikethrough + emphasis), rendered larger (`ProductPricing`'s `lg` size) since there's room and it's a primary decision point here, not secondary metadata. The regular price is a semantic `<del>` (not just a CSS strikethrough), paired with `sr-only` "Regular price"/"Now" labels on both amounts (`feature/ui-product-detail`) — see docs/decisions.md. No color change: the emphasized sale price stays `text-foreground`, not `text-primary` (see the Colour System's Accent note above). |
+| Add to Cart | — (`AddToCartButton`, `feature/cart`) | Directly below `ProductInfo`, in the same info column — the page's one primary CTA. `default` variant, `lg` size (`feature/ui-product-detail` — Button hierarchy's own rule reserves `lg` "for a page's single most important CTA"; confirmed this button's only real consumer). No icon: evaluated and deliberately not added — "Add to Cart" is already unambiguous text, and no UX justification for an icon was found independent of visual parity with a UX reference. Adds a fixed quantity of 1; no quantity picker on this page for v1 — quantity is adjusted from `/cart` instead. |
 | Description | `description` | Rendered as real HTML (WordPress-admin-authored WooCommerce content — see docs/decisions.md for the trust boundary), Body size, restrained list/paragraph spacing. Not shown on the card. |
-| Meta | `producer`, `productType`, `categories`, `tags` | Grouped separately below price/description (`ProductMeta`), a simple label/value list — categories linked (a real route exists), tags plain (no tag-browsing route exists yet, not invented speculatively), producer linked only once real producer data exists (currently always a placeholder, same as the card). |
+| Meta | `producer`, `productType`, `categories`, `tags` | Grouped separately below price/description (`ProductMeta`), a simple label/value list — categories linked (a real route exists), tags plain (no tag-browsing route exists yet, not invented speculatively), producer linked only once real producer data exists (currently always a placeholder, same as the card). `MusicProduct.bpm`/`.musicalKey`/`.fileFormat`/`.genres` are **not** surfaced here — confirmed during `feature/ui-product-detail` that none of the four have a WooCommerce/WPGraphQL schema source at all (not merely unmapped); see docs/decisions.md. |
 | Breadcrumbs | — | Home → Products → [title], per Navigation Principles below — this page is exactly the "more than two levels from home" case that rule describes. |
-| Layout | — | Two columns at desktop/tablet (gallery, info), one column mobile — same responsive tiers as everywhere else in this system, no new breakpoint behavior. |
+| Layout | — | Two columns from **tablet** width (768px) through desktop, one column mobile (`feature/ui-product-detail` — corrected from a `lg:` (1024px) breakpoint that didn't match this row's own documented claim or the Responsive Strategy's Tablet-tier rule; the row's text was already correct, the implementation wasn't). |
 
 ---
 

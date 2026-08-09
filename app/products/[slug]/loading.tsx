@@ -14,7 +14,7 @@ export default function ProductDetailLoading() {
   return (
     <Section>
       <Skeleton className="mb-8 h-4 w-48" />
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2 lg:gap-12">
+      <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:gap-12">
         <ProductGallerySkeleton />
         <ProductInfoSkeleton />
       </div>

@@ -2527,3 +2527,159 @@ verification — flagged here rather than claimed. `git diff --name-only`
 confirms `services/`, `graphql/`, `types/`, `lib/apollo/`, and every
 `app/**/page.tsx` route are untouched; the only `.ts`/`.tsx` files
 changed are `ProductCard.tsx` and `ProductCardSkeleton.tsx`.
+
+## Product Detail: breakpoint, gallery semantics, pricing accessibility
+
+`feature/ui-product-detail` corrects three verified presentation gaps in
+`app/products/[slug]` and its components, evaluates a fourth (Add to
+Cart) and rejects part of it, and blocks a fifth (domain-data surfacing)
+outright once its precondition failed. Governing plan:
+`docs/plans/ui-product-detail-plan.md`. As with prior branches in this
+initiative: audit-driven, not Sample-Select-driven — every change here is
+grounded in a mismatch against this project's own already-written rules
+or a verified accessibility gap, not "Sample Select does it differently."
+
+### Two-column breakpoint: the code was wrong, not the documentation
+
+`docs/design-system.md`'s Responsive Strategy table and its own Product
+Detail Anatomy row both already claimed — in the present tense, as
+already-true fact — that Product Detail is two columns from tablet width
+(768px). The actual grid switched at `lg:` (1024px). Verified by reading
+the code directly rather than trusting the doc was in sync with it (the
+doc turned out to be the correct description of *intent*, just not of
+what shipped). Fixed by changing `app/products/[slug]/page.tsx`'s grid to
+`md:grid-cols-2` — and `app/products/[slug]/loading.tsx`'s matching grid
+to the same breakpoint, to preserve that file's own stated invariant
+("same grid shape as the real page so nothing visibly jumps"), not as a
+separate change to the Detail Pattern's error-handling mitigation, which
+this branch does not touch.
+
+### `ProductGallery`'s secondary images: now a semantic list
+
+Secondary gallery images were a bare `<div className="grid grid-cols-4
+gap-2">` of `ProductImage`s — a repeated collection of items rendered
+without list semantics, inconsistent with this project's own established
+convention for exactly this situation (`ProductGrid` already uses
+`<ul>/<li>` for its repeated `ProductCard`s). Changed to `<ul>/<li>`,
+identical visual output — no new classes, no API change to
+`ProductGallery` or `ProductImage`.
+
+### `ProductPricing`: the deferred semantic-markup finding, closed
+
+Recap: `ProductPricing`'s regular price was a plain `<span>` with only a
+CSS strikethrough — not a semantic `<del>`/`<s>`, no accessible text
+distinguishing "was" from "now." `feature/ui-product-grid` found this and
+deliberately deferred it here, since `ProductPricing`'s only two
+consumers are `ProductCard` (already shipped) and `ProductInfo`/Product
+Detail (this branch, `size="lg"`, the primary purchase-decision point).
+
+**Fix:** the regular price is now a semantic `<del>` (visually identical —
+the existing `line-through` class stays; `<del>`'s own default
+strikethrough is redundant with it, not a conflict), paired with
+`sr-only` "Regular price"/"Now" labels on both amounts. Purely markup —
+no visual or color change. The emphasized sale price stays
+`text-foreground`; `--primary` as bare text was already verified to fail
+WCAG AA in `feature/ui-product-grid`, and that finding is not reopened
+here, only reconfirmed. Because `ProductPricing` is shared with
+`ProductCard`, this fix necessarily also applies there — an unavoidable
+consequence of fixing one shared component's markup, not a `ProductCard`
+redesign; nothing about `ProductCard`'s visual output changed.
+
+Two documentation lines were also corrected as a direct consequence,
+since both still described sale-price text as viable in "Text Primary or
+Accent," contradicting `feature/ui-product-grid`'s own already-recorded
+finding: the Colour System's Accent row (general system documentation,
+squarely this branch's to fix) and Product Card Anatomy's Pricing row
+(nominally `feature/ui-product-grid`'s section — fixed anyway, since it's
+the same one-fact, two-word correction and a separate branch for that
+would be disproportionate process; documentation only, no `ProductCard`
+visual change). A clarifying note was added distinguishing "sale
+indicator" (a filled badge surface — safe, verified) from "sale-price
+text" (bare text — not safe), since conflating the two is exactly what
+produced the stale lines in the first place.
+
+### `AddToCartButton`: size adjusted, icon evaluated and rejected
+
+Evaluated per explicit instruction before changing anything, not assumed
+from the audit alone finding "no size/icon set":
+
+- **Size — justified, implemented.** `design-system.md`'s own Button
+  hierarchy reserves `lg` "for a page's single most important CTA."
+  Confirmed (repo-wide search) `AddToCartButton` has exactly one real
+  consumer, and is that page's one primary action, currently rendering at
+  the implicit `default` size. Direct match to an existing rule,
+  independent of any external reference. Now `size="lg"`.
+- **Icon — evaluated, not added.** "Add to Cart" is already fully
+  unambiguous text; no UX justification for a cart icon was found that
+  doesn't reduce to "a reference site has one" — unlike this codebase's
+  existing `ArrowRight`/`data-icon="inline-end"` precedent (a directional
+  cue for pagination, disambiguating something text alone doesn't). No
+  new `Button` variant introduced either way.
+- Accent color needed no change: `Button`'s `default` variant already
+  resolves to `bg-primary`/`text-primary-foreground`, untouched by
+  `feature/ui-product-grid` or this branch — it was already correct.
+- `lg` is `h-9` (36px) — better than the prior 32px, still short of
+  `design-system.md`'s own aspirational 44px touch-target minimum (though
+  it clears WCAG 2.5.8 AA's 24×24px baseline). The same pre-existing,
+  project-wide `Button`-primitive gap `feature/ui-product-grid` already
+  found and deferred — flagged again, not silently repeated or
+  half-fixed here, still `feature/ui-polish`'s to resolve systemically.
+
+### Domain-data surfacing: blocked at its own precondition, not implemented
+
+The plan proposed surfacing `MusicProduct.bpm`/`.musicalKey`/`.fileFormat`/
+`.genres` on Product Detail, contingent on first verifying these fields
+are actually reachable through the existing GraphQL/DTO layer.
+**Verified directly against `graphql/fragments/product.fragment.ts` and
+`services/mappers/product.mapper.ts`: they are not.** The fragment's own
+comment states plainly that `bpm`, `musicalKey`, `genres`, and
+`fileFormat` (along with `previewUrl`, `duration`, `productType`) "have no
+current WooCommerce source" and aren't requested; the mapper
+unconditionally hardcodes all four to `null`/`[]` for every product. This
+isn't unmapped-but-available data — it's the same, already-documented
+outcome of the original schema investigation ("Schema investigation," this
+file, confirming these fields "genuinely have no [schema source]"), not
+new information. Per the branch's own condition: stopped here, nothing
+implemented. `ProductMeta`, `ProductMeta.types.ts`, `product-info.mapper.ts`,
+and `ProductInfoSkeleton.tsx` are all untouched — no GraphQL, DTO, or
+mapper expansion attempted.
+
+### Roadmap dependency corrected in `docs/plans/` only
+
+`docs/plans/ui-architecture-review.md` listed `feature/ui-product-detail`
+as depending on `feature/ui-audio-preview` — a branch that doesn't exist
+yet, with Audio Preview explicitly out of scope here. Verified this
+branch's actual work has no real dependency on it (every change above is
+independent), so the roadmap entry was loosened to depend only on
+`ui-tokens`/`ui-product-grid`, with a note that audio preview layers onto
+`ProductGallery`/`ProductInfo` later on its own already-planned branch.
+Planning-doc correction only — no architecture change, same discipline as
+the `ProductFilters` roadmap split in the previous branch.
+
+### Verification
+
+`tsc --noEmit`, `eslint`, and `next build` all pass cleanly. The live
+WooCommerce backend had zero real products at verification time
+(`wp post list --post_type=product --post_status=any` → 0) — per explicit
+instruction, no product was created to work around this, so full
+pipeline verification against real product data (gallery imagery, sale
+pricing, Add to Cart) was not possible this pass and is not claimed.
+What *was* verified against the live app: the not-found path (a
+nonexistent slug correctly renders `DetailNotFound` via the existing
+inline conditional, HTTP 200 rather than a real 404 — confirming the
+Next.js `notFound()` mitigation is still the mechanism in play, not
+bypassed), and the empty-catalog state on `/products`. `ProductGallery`'s
+list markup and `ProductPricing`'s `<del>`/`sr-only` markup were
+structurally verified via the `app/dev/product-detail` fixture page,
+which composes the real components directly. The breakpoint fix could not
+be verified the same way — that fixture reimplements its own grid
+independently of `app/products/[slug]/page.tsx` rather than importing it,
+and is out of this branch's scope to touch — so it's confirmed by direct
+source inspection only, not rendered output. No browser-automation
+connector was available this session; none of the above is claimed as a
+real-browser visual pass. `git diff --name-only` confirms `services/`,
+`graphql/`, `types/`, `lib/apollo/`, `ProductGrid`, `ProductCard`,
+`ProductFilters`, `Header`, `Footer`, the homepage, cart, and checkout are
+all untouched; the changed files are exactly `app/products/[slug]/page.tsx`,
+`app/products/[slug]/loading.tsx`, `ProductGallery.tsx`,
+`AddToCartButton.tsx`, and `ProductPricing.tsx`.

@@ -23,16 +23,13 @@ export function ProductGallery({ primary, secondary }: ProductGalleryProps) {
       />
 
       {secondary.length > 0 ? (
-        <div className="grid grid-cols-4 gap-2">
+        <ul className="grid grid-cols-4 gap-2">
           {secondary.map((image) => (
-            <ProductImage
-              key={image.url}
-              artwork={image}
-              sizes="120px"
-              className="rounded-lg"
-            />
+            <li key={image.url}>
+              <ProductImage artwork={image} sizes="120px" className="rounded-lg" />
+            </li>
           ))}
-        </div>
+        </ul>
       ) : null}
     </div>
   );

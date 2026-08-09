@@ -8,11 +8,16 @@ import type { AddToCartButtonProps } from "./AddToCartButton.types";
 
 /**
  * The Product Detail page's one primary CTA (design-system.md's Button
- * hierarchy: `default` variant, "at most one per view/section"). Adds a
- * fixed quantity of 1 — no quantity picker here for v1; a shopper adjusts
- * quantity from `/cart` after adding, keeping this button and the Detail
- * page's layout unchanged beyond its own presence. Quick-add from
- * `ProductCard`/listing grids is deliberately out of scope for this pass.
+ * hierarchy: `default` variant, `lg` size — "reserved for a page's single
+ * most important CTA," confirmed this is the button's only real consumer,
+ * see docs/decisions.md, "Product Detail: breakpoint, gallery semantics,
+ * pricing accessibility"). No icon: "Add to Cart" is already unambiguous
+ * text: an icon here wouldn't disambiguate anything, unlike this
+ * component's evaluated-and-rejected candidate. Adds a fixed quantity of
+ * 1 — no quantity picker here for v1; a shopper adjusts quantity from
+ * `/cart` after adding, keeping this button and the Detail page's layout
+ * unchanged beyond its own presence. Quick-add from `ProductCard`/listing
+ * grids is deliberately out of scope for this pass.
  *
  * Wraps a real `<form action={formAction}>` (via `useActionState`) rather
  * than a bare `onClick`, so the mutation still works as a plain form
@@ -35,7 +40,7 @@ export function AddToCartButton({ productId, className }: AddToCartButtonProps) 
 
   return (
     <form action={formAction} className={className}>
-      <Button type="submit" disabled={isPending}>
+      <Button type="submit" size="lg" disabled={isPending}>
         {isPending ? "Adding…" : "Add to Cart"}
       </Button>
       {state && !state.ok ? (
