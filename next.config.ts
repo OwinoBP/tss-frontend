@@ -31,6 +31,21 @@ function backendRemotePattern(): NonNullable<
 }
 
 const nextConfig: NextConfig = {
+  /**
+   * Next.js blocks cross-origin requests to dev-only assets/endpoints
+   * (`/_next/static/*`, `/_next/webpack-hmr`) by default — confirmed live
+   * as the actual cause of both the Add to Cart failure and the HMR
+   * WebSocket errors when this dev server is exposed through the current
+   * Cloudflare Quick Tunnel session: the tunnel's origin isn't `localhost`,
+   * so those requests were rejected with 403 "Unauthorized" before React
+   * ever hydrated (see docs/decisions.md). This is the literal, currently
+   * active Quick Tunnel hostname for this demo session only — Quick
+   * Tunnel hostnames are randomly regenerated on every `cloudflared`
+   * restart, so this needs updating (or removing) whenever the tunnel URL
+   * changes; not a permanent or production concern (`next build`/`next
+   * start` don't have this dev-only guard at all).
+   */
+  allowedDevOrigins: ["sept-kelly-violation-ministry.trycloudflare.com"],
   images: {
     remotePatterns: backendRemotePattern(),
     /**
